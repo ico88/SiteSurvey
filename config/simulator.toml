@@ -1,0 +1,14 @@
+# Configurazione per prove senza radio (su PC o Pi)
+[general]
+data_dir = "./data"
+control_socket = "./data/control.sock"
+
+[radio]
+driver = "simulator"
+
+[gps]
+source = "radio"
+
+[display]
+driver = "none"     # "ssd1306" per vedere il display sul Pi
+button_gpio = -1

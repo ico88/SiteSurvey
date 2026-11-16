@@ -1,0 +1,28 @@
+[Unit]
+Description=Radio Site Survey (RSSI + GPS da radio DMR/analogica)
+After=local-fs.target network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=sitesurvey
+Group=sitesurvey
+SupplementaryGroups=gpio i2c dialout
+ExecStart=/opt/sitesurvey/venv/bin/sitesurvey -c /etc/sitesurvey/config.toml run
+Restart=always
+RestartSec=3
+# /run/sitesurvey (socket di controllo) e /var/lib/sitesurvey (sessioni)
+RuntimeDirectory=sitesurvey
+RuntimeDirectoryMode=0750
+StateDirectory=sitesurvey
+# necessario solo se gps.set_system_time = true (il Pi non ha RTC)
+AmbientCapabilities=CAP_SYS_TIME
+CapabilityBoundingSet=CAP_SYS_TIME
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/sitesurvey
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

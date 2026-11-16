@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sitesurvey"
+version = "0.1.0"
+description = "Site survey DMR/analogico per radio Motorola MOTOTRBO e Hytera: RSSI + GPS -> mappa di copertura"
+requires-python = ">=3.9"
+dependencies = [
+    "pyserial>=3.5",
+    "tomli>=1.1; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+# Display OLED + pulsante sul Raspberry Pi
+pi = ["luma.oled>=3.8", "gpiozero>=1.6", "lgpio; python_version >= '3.11'"]
+test = ["pytest"]
+
+[project.scripts]
+sitesurvey = "sitesurvey.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["sitesurvey*"]
+
+[tool.setuptools.package-data]
+sitesurvey = ["templates/*.html"]

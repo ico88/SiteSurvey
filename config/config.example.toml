@@ -1,0 +1,83 @@
+# Configurazione Site Survey - copiare in /etc/sitesurvey/config.toml
+# Ogni valore omesso usa il default (vedi sitesurvey/config.py).
+
+[general]
+data_dir = "/var/lib/sitesurvey"
+log_level = "INFO"
+control_socket = "/run/sitesurvey/control.sock"
+
+[radio]
+driver = "motorola"        # motorola | hytera | simulator
+mode = "dmr"               # dmr | analog (solo informativo nei dati + scelta beacon)
+reconnect_interval_s = 5
+
+[radio.motorola]
+host = "192.168.10.1"      # IP della radio sull'interfaccia USB
+xnl_port = 8002
+# Chiave e delta XNL forniti da Motorola (programma MOTOTRBO ADK / Application Partner).
+# Senza questi valori non e' possibile leggere l'RSSI.
+xnl_key = [0x00000000, 0x00000000, 0x00000000, 0x00000000]
+xnl_delta = 0x00000000
+lrrp_port = 4001           # servizio Location della radio (abilitare GPS e "Location" in CPS)
+lrrp_local_port = 4001
+rssi_status_code = 0x02    # XCMP Radio Status: condizione RSSI
+rssi_scale = 1.0
+rssi_offset = 0.0
+cai_network = 12           # rete CAI individuale (CPS: Network > CAI Network)
+cai_group_network = 225    # rete CAI gruppi
+
+[radio.hytera]
+host = "192.168.10.1"
+transport = "udp"          # udp | tcp
+rcp_port = 30005
+lp_port = 30003
+radio_id = 1               # ID della radio collegata
+cai_network = 10
+# Opcode RCP per la lettura RSSI: dipende da modello/firmware, vedi docs/PROTOCOLLI.md
+rssi_opcode = 0
+rssi_request_data = ""
+rssi_reply_offset = 0
+rssi_reply_len = 2
+
+[beacon]
+enabled = true
+# data: pacchetto dati DMR verso target_id (fa agganciare il ripetitore)
+# ptt : breve trasmissione (analogico) - richiede opcode PTT configurato
+# none: misura passiva (canale con portante continua)
+kind = "data"
+target_id = 1              # ID radio/console di destinazione del beacon
+target_is_group = false
+target_port = 4007
+payload = "SITESURVEY"
+settle_ms = 300            # attesa dopo il beacon prima di leggere l'RSSI
+ptt_ms = 500
+
+[survey]
+interval_s = 2.0           # un campione ogni N secondi durante la registrazione
+min_distance_m = 0         # >0: registra solo se ci si e' spostati di almeno N metri
+rssi_samples = 3           # letture RSSI per campione
+rssi_sample_spacing_ms = 150
+rssi_aggregate = "max"     # max | mean | median
+require_gps_fix = true
+auto_start = false         # avvia la registrazione all'accensione
+
+[gps]
+source = "auto"            # radio | nmea | auto (NMEA se presente, altrimenti radio)
+nmea_device = "/dev/ttyACM0"
+nmea_baud = 9600
+max_age_s = 5
+set_system_time = true     # imposta l'orologio del Pi dal GPS (il Pi non ha RTC)
+
+[display]
+driver = "ssd1306"         # ssd1306 | sh1106 | none
+i2c_port = 1
+i2c_address = 0x3C
+width = 128
+height = 32                # PiOLED 128x32; 64 per display 128x64
+rotate = 0
+button_gpio = 5            # pulsante start/stop verso GND; -1 = nessuno
+led_gpio = -1              # LED di registrazione opzionale
+
+[export]
+thresholds = [-85, -95, -105, -115]   # Ottimo / Buono / Discreto / Scarso / Critico
+grid_m = 50

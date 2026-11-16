@@ -1,0 +1,82 @@
+import json
+import threading
+import time
+
+from sitesurvey.config import DEFAULTS, _merge
+from sitesurvey.control import ControlServer, send_command
+from sitesurvey.display import status_lines
+from sitesurvey.export import export_session, grid, level, load_samples
+from sitesurvey.surveyor import Surveyor
+
+
+def make_cfg(tmp_path):
+    return _merge(DEFAULTS, {
+        "general": {"data_dir": str(tmp_path), "control_socket": str(tmp_path / "ctl.sock")},
+        "radio": {"driver": "simulator", "simulator": {"speed_kmh": 3000}},
+        "gps": {"source": "radio"},
+        "survey": {"interval_s": 0.05, "idle_interval_s": 0.05, "rssi_samples": 2,
+                   "rssi_sample_spacing_ms": 1},
+        "beacon": {"settle_ms": 1},
+        "display": {"driver": "none", "button_gpio": -1},
+    })
+
+
+def test_end_to_end_simulator(tmp_path):
+    cfg = make_cfg(tmp_path)
+    sv = Surveyor(cfg)
+    ctl = ControlServer(cfg["general"]["control_socket"], sv)
+    ctl.start()
+    t = threading.Thread(target=sv.run, daemon=True)
+    t.start()
+    try:
+        time.sleep(0.3)
+        st = send_command(cfg["general"]["control_socket"], "status")
+        assert st["radio_connected"] and st["gps"]["valid"] and not st["recording"]
+        assert send_command(cfg["general"]["control_socket"], "toggle")["recording"]
+        time.sleep(1.0)
+        st = send_command(cfg["general"]["control_socket"], "stop")
+        assert not st["recording"] and st["samples"] > 5
+        assert "error" in send_command(cfg["general"]["control_socket"], "boh")
+    finally:
+        sv.shutdown()
+        t.join(3)
+        ctl.stop()
+
+    sess = next((tmp_path / "sessions").iterdir())
+    meta = json.loads((sess / "meta.json").read_text())
+    assert meta["samples"] == st["samples"]
+    samples = load_samples(sess)
+    assert len(samples) == st["samples"]
+    files = export_session(sess, cell_m=100)
+    html = files["html"].read_text()
+    assert "__DATA__" not in html and '"samples":[' in html
+    assert "<kml" in files["kml"].read_text()
+    gj = json.loads(files["geojson"].read_text())
+    assert gj["features"]
+
+
+def test_level_and_grid():
+    assert level(-70)[0] == "Ottimo"
+    assert level(-100)[0] == "Discreto"
+    assert level(-130)[0] == "Critico"
+    assert level(None)[0] == "Nessun segnale"
+    s = [{"lat": 45.0, "lon": 9.0, "rssi": -80}, {"lat": 45.00001, "lon": 9.00001, "rssi": -90},
+         {"lat": 45.01, "lon": 9.01, "rssi": None}]
+    cells = grid(s, 50)
+    assert len(cells) == 2
+    full = [c for c in cells if c["n"] == 2][0]
+    assert full["rssi"] == -85
+
+
+def test_status_lines():
+    snap = {"radio_connected": True, "radio": {"vendor": "motorola", "model": "DM4600", "mode": "dmr"},
+            "gps": {"valid": True, "sats": 9, "source": "radio"}, "recording": True, "elapsed_s": 3725,
+            "samples": 12, "last_rssi": -91.2, "message": ""}
+    lines = status_lines(snap, True)
+    assert lines[0].startswith("RADIO OK DM4600")
+    assert lines[1].startswith("GPS FIX 9sat")
+    assert lines[2].startswith("REC*01:02:05 n12")
+    assert all(len(x) <= 21 for x in lines[:3])
+    snap.update(radio_connected=False, recording=False, gps={"valid": False})
+    lines = status_lines(snap, False)
+    assert lines[0].startswith("RADIO --") and lines[1].startswith("GPS --") and lines[2].startswith("STOP")
