@@ -103,12 +103,14 @@ Questo codice **riusa i moduli già verificati sul campo** nei repo
   challenge/response a **lookup** (nessuna chiave ADK): servono le coppie da
   Wireshark, in `[radio.motorola.xcmp_lookup]`.
 - **Hytera**: transport HRNP su **USB bulk** verificato sul campo (MD785i): stato
-  canale, busy/carrier, beacon PTT. GPS via radio non ancora validato → GPS USB.
-- **RSSI numerico in dBm**: è la parte **ancora da reverse-engineerare** su
-  hardware (Motorola notifica `b40e`; Hytera livello `0x09` / opcode candidati).
-  Si tara con `sitesurvey probe --rssi-scan`; finché non è tarato il campo RSSI
-  resta vuoto. Vedi docs/PROTOCOLLI.md.
-- Prima messa in servizio: `sitesurvey probe -v` (e `--rssi-scan` per l'RSSI).
+  canale, busy/carrier, beacon PTT. **GPS + RSSI insieme** via Location Protocol
+  (report `0xA004`), ispirato a ok-dmrlib (riscritto, non-AGPL). Richiede il
+  `radio_id` della radio base.
+- **RSSI Motorola**: letto col metodo noto **menu RSSI nascosto + testo del
+  display** (DISPTXT), ispirato al progetto MIT trboxcmp. Dà il dBm reale che la
+  radio mostra. Richiede XCMP autenticato.
+- Prima messa in servizio: `sitesurvey probe -v` (e `--rssi-scan` per vedere i
+  frame/display e aggiustare `menu_sequence`/`scale`). Vedi docs/PROTOCOLLI.md.
 
 ## Struttura
 

@@ -12,6 +12,8 @@ pyusb (la disponibilita' si verifica con usb_available()).
 from __future__ import annotations
 
 import logging
+import re
+import socket
 import struct
 import threading
 import time
@@ -22,6 +24,7 @@ HYTERA_VID = 0x238B
 HYTERA_PID = 0x0A21
 EP_OUT = 0x04
 EP_IN = 0x84
+HRNP_HEADER = 0x7E
 
 HDAP_SERVICE = {"RCP": 0x02, "LP": 0x08, "TMP": 0x09, "RRS": 0x11}
 RCP_OPCODE = {
@@ -35,6 +38,83 @@ RCP_OPCODE = {
 RCP_RSSI_CANDIDATES = [0x00E7, 0x0227, 0x0201]
 BUTTON_TARGET = {"front_ptt": 0x03, "back_ptt": 0x1E, "channel_up": 0x22, "channel_down": 0x23}
 BUTTON_OP = {"release": 0, "press": 1, "short": 2, "long": 3}
+
+# Location Protocol (servizio LP = 0x08). Report con RSSI incluso.
+# (struttura verificata sulla libreria OK-DMR/ok-dmrlib, AGPL: qui riscritta.)
+LP_STANDARD_REQUEST = 0xA001
+LP_STANDARD_REPORT = 0xA002
+LP_STANDARD_REPORT_RSSI = 0xA004
+LP_CONDITION_REPORT = 0xD003
+LP_CONDITION_REPORT_RSSI = 0xD004
+LP_RSSI_CONFIG_REQUEST = 0xE001
+LP_RSSI_CONFIG_ANSWER = 0xE002
+HYTERA_CAI_NET = 10
+
+# GPSData LP: 40 byte, campi ASCII tipo-NMEA.
+_LP_GPS_RE = re.compile(rb"([AV])(\d{6})(\d{6})([NS])(\d{4}\.\d+)([EW])(\d{5}\.\d+)(\d+\.?\d*)?(\d+)?")
+
+
+def cai_ip_bytes(radio_id: int, net: int = HYTERA_CAI_NET) -> bytes:
+    return bytes([net, (radio_id >> 16) & 0xFF, (radio_id >> 8) & 0xFF, radio_id & 0xFF])
+
+
+def build_lp_request(radio_id: int, net: int = HYTERA_CAI_NET, request_id: int = 1) -> bytes:
+    """LP StandardRequest (0xA001): payload = request_id(4 BE) + radio_ip(4)."""
+    payload = struct.pack(">I", request_id & 0xFFFFFFFF) + cai_ip_bytes(radio_id, net)
+    return build_hdap(HDAP_SERVICE["LP"], LP_STANDARD_REQUEST, payload, reliable=True)
+
+
+def build_lp_rssi_config(radio_id: int, net: int = HYTERA_CAI_NET, request_id: int = 1,
+                         enable: bool = True) -> bytes:
+    """LP RSSIReportConfigRequest (0xE001): attiva i report con RSSI."""
+    payload = (struct.pack(">I", request_id & 0xFFFFFFFF) + cai_ip_bytes(radio_id, net)
+               + bytes([0x01 if enable else 0x00]))
+    return build_hdap(HDAP_SERVICE["LP"], LP_RSSI_CONFIG_REQUEST, payload, reliable=True)
+
+
+def parse_lp_gpsdata(block: bytes) -> dict:
+    """Decodifica il blocco GPSData (ASCII tipo-NMEA) dei report LP."""
+    m = _LP_GPS_RE.search(block)
+    if not m:
+        return {"valid": False}
+    lat = int(m.group(5)[:2]) + float(m.group(5)[2:]) / 60
+    lon = int(m.group(7)[:3]) + float(m.group(7)[3:]) / 60
+    if m.group(4) == b"S":
+        lat = -lat
+    if m.group(6) == b"W":
+        lon = -lon
+    speed = float(m.group(8)) * 1.852 if m.group(8) else None  # nodi -> km/h
+    heading = float(m.group(9)) if m.group(9) else None
+    return {"valid": m.group(1) == b"A", "lat": round(lat, 6), "lon": round(lon, 6),
+            "speed_kmh": round(speed, 1) if speed is not None else None, "heading": heading}
+
+
+def parse_lp_report(reply: bytes) -> dict | None:
+    """Decodifica un report LP (0xA002/0xA004/0xD003/0xD004).
+
+    HDAP = [service][opcode:2 BE][len:2 BE][payload][csum][0x03].
+    payload = request_id(4) + radio_ip(4) + result(2) + GPSData(40) [+ RSSI].
+    Il report ...RSSI (0xA004/0xD004) porta l'RSSI dopo il blocco GPS.
+    """
+    h = reply[12:] if len(reply) > 12 and reply[0] == HRNP_HEADER else reply
+    if len(h) < 5 or (h[0] & 0x7F) != HDAP_SERVICE["LP"]:
+        return None
+    opcode = int.from_bytes(h[1:3], "big")
+    n = int.from_bytes(h[3:5], "big")
+    payload = h[5:5 + n]
+    if len(payload) < 10:
+        return None
+    radio_ip = payload[4:8]
+    rid = (radio_ip[1] << 16) | (radio_ip[2] << 8) | radio_ip[3]
+    gps = parse_lp_gpsdata(payload[10:50])
+    out = {"opcode": opcode, "radio_id": rid, **gps, "rssi_raw": None}
+    if opcode in (LP_STANDARD_REPORT_RSSI, LP_CONDITION_REPORT_RSSI):
+        tail = payload[50:]
+        if tail:
+            # RSSI Hytera: 1-2 byte dopo il GPS. Valore grezzo (da mappare in dBm).
+            out["rssi_raw"] = int.from_bytes(tail[:2] if len(tail) >= 2 else tail[:1],
+                                             "little", signed=True)
+    return out
 
 # Opcode HRNP
 OP_DATA = 0x00
@@ -221,6 +301,16 @@ class HyteraUsb:
     def query_channel_status(self) -> dict | None:
         reply = self.transact(build_hdap(HDAP_SERVICE["RCP"], RCP_OPCODE["channel-status"], b""))
         return parse_channel_status(reply) if reply else None
+
+    def configure_rssi_reports(self, radio_id: int, net: int = HYTERA_CAI_NET, enable: bool = True) -> bool:
+        """Attiva i report LP con RSSI (0xE001). Da chiamare una volta dopo connect."""
+        reply = self.transact(build_lp_rssi_config(radio_id, net, enable=enable))
+        return reply is not None
+
+    def query_location(self, radio_id: int, net: int = HYTERA_CAI_NET, request_id: int = 1) -> dict | None:
+        """Richiede la posizione (LP StandardRequest) e decodifica il report (GPS + RSSI)."""
+        reply = self.transact(build_lp_request(radio_id, net, request_id), timeout=1500)
+        return parse_lp_report(reply) if reply else None
 
     def ptt(self, on: bool) -> None:
         op = BUTTON_OP["press"] if on else BUTTON_OP["release"]

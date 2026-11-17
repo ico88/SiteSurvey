@@ -31,7 +31,7 @@ lsusb | grep -i 238b
 | Beacon DMR | pacchetto UDP verso l'IP CAI (`12.x.y.z`, gruppi `225.x.y.z`) | Implementato |
 | Beacon analogico | PTT via XCMP (subop `0x0415`) | Richiede XCMP autenticato |
 | Auth XCMP | challenge/response a **lookup** (nessuna chiave ADK) | Dai dump; servono le coppie |
-| **RSSI numerico** | notifica XCMP `b40e` "RSSI_OR_SIGNAL" | **DA REVERSE-ENGINEERARE** |
+| **RSSI numerico** | menu RSSI nascosto (tasti) + testo del display (DISPTXT) | Metodo noto (trboxcmp, MIT) |
 
 ### GPS — nessuna licenza
 Il GPS funziona senza XCMP e senza chiavi: basta abilitare GPS e "Location"/
@@ -68,21 +68,28 @@ catture Wireshark). Si ritenta la connessione finché la challenge cade su un
 random in tabella. Le coppie vanno in `[radio.motorola.xcmp_lookup]`; tre sono
 già incluse come default. **Non serve la chiave ADK/TEA.**
 
-### RSSI numerico — da reverse-engineerare
-Nei repo esistenti la notifica `b40e` ("RSSI_OR_SIGNAL") viene solo ACK-ata, mai
-decodificata in un valore. Qui la sessione XCMP **raccoglie** quelle notifiche;
-il byte che contiene l'RSSI va individuato su hardware:
+### RSSI numerico — metodo "menu nascosto + display"
+MOTOTRBO non espone un RSSI numerico pulito via XCMP. Il metodo usato dai
+progetti noti (es. **nr23730/trboxcmp**, MIT) è: entrare nel **menu RSSI
+nascosto** della radio con una sequenza di tasti (default: sinistra×3,
+destra×3), poi leggere il **dBm dal testo del display**, che la radio trasmette
+come broadcast `DISPTXT` (`0xB401`). È lo stesso valore che vedi sullo schermo in
+modalità test.
 
+In `[radio.motorola.rssi]` con `method="disptxt_menu"`:
+- `menu_sequence` — i tasti per arrivare alla schermata RSSI (dipende dal
+  modello/codeplug; cambiali se serve);
+- `text_regex` — opzionale, per estrarre il numero se il formato del display è
+  particolare (vuoto = cerca un numero `-dd`/`-ddd`).
+
+Richiede XCMP autenticato (`xcmp_enabled=true` + coppie `xcmp_lookup`). Per
+verificare cosa manda il display:
 ```bash
 sudo systemctl stop sitesurvey
-# abilita xcmp_enabled=true e metti le coppie lookup, poi:
-sitesurvey probe --driver motorola --rssi-scan --beacon -n 30
+sitesurvey probe --driver motorola --rssi-scan -n 20
 ```
-Fai una misura **vicino al ponte** e una **lontano**: confronta i frame, trova
-il byte che cambia con il segnale e impostalo in `[radio.motorola.rssi]`
-(`method="xcmp_notify"`, `value_offset`, `value_len`, `scale`, `offset`).
-Finché non è tarato, `method="none"` e l'RSSI resta vuoto (onesto: meglio
-nessun dato che un dato finto).
+Mostra le righe `display:` catturate: se il formato è diverso, aggiusta
+`menu_sequence` o `text_regex`.
 
 ## Hytera
 
@@ -90,24 +97,27 @@ nessun dato che un dato finto).
 |---|---|---|
 | Trasporto/sessione | HRNP su USB bulk, handshake CONNECT→ACCEPT | **Verificato sul campo** (MD785i) |
 | Stato canale / busy | RCP `0x00E7` (freq RX/TX, carrier/occupato) | **Verificato sul campo** |
-| Livello segnale grezzo | tag `0x09` del `0x00E7` | Esposto, **non in dBm** |
+| **GPS + RSSI insieme** | Location Protocol: `StandardReportWithRSSI 0xA004` | Implementato (riferimento ok-dmrlib) |
+| GPS | LP `StandardRequest 0xA001` → report (ASCII tipo-NMEA) | Implementato |
 | Beacon | PTT breve (RCPButton FRONT_PTT) | Implementato |
-| **RSSI numerico** | dal livello `0x09`, o opcode candidati `0x0227`/`0x0201` | **DA TARARE** |
-| GPS via radio | servizio LP | **Non validato** → usare GPS USB |
+| Livello segnale grezzo | tag `0x09` del `0x00E7` (fallback) | Esposto |
 
-### RSSI Hytera — da tarare
-Il `0x00E7` restituisce un livello grezzo (tag `0x09`), significativo soprattutto
-quando c'è portante (busy). Per trasformarlo in dBm:
-```bash
-sitesurvey probe --driver hytera --rssi-scan --beacon -n 30
-```
-Interroga anche gli opcode candidati `0x0227`/`0x0201`. Trovata la relazione
-livello→dBm, imposta `[radio.hytera.rssi]` con `method="channel_status_level"`,
-`scale`, `offset`.
+### GPS + RSSI via Location Protocol (consigliato)
+Il Location Protocol Hytera (servizio LP, `0x08`) restituisce **posizione e RSSI
+nello stesso report**: si attivano i report con RSSI (`RSSIReportConfigRequest
+0xE001`) e si interroga la radio (`StandardRequest 0xA001`); la risposta
+(`StandardReport 0xA002` o `StandardReportWithRSSI 0xA004`) contiene il blocco
+GPS (ASCII tipo-NMEA) e, nelle varianti RSSI, il valore dopo il GPS.
 
-### GPS Hytera
-Il formato LP non è ancora validato, quindi `get_location()` è disattivato: con
-Hytera usa un **GPS USB esterno** (`gps.source = "nmea"`).
+In `[radio.hytera]` imposta `radio_id` (l'ID della radio base) e in
+`[radio.hytera.rssi]` `method="lp"`. Il valore RSSI grezzo si mappa in dBm con
+`scale`/`offset` (da confermare sul modello). La struttura è ripresa dalla
+libreria **OK-DMR/ok-dmrlib** (AGPL, qui **riscritta** per non vincolare la
+licenza del progetto).
+
+> Nota: senza `radio_id` le query LP non partono — in quel caso usa un GPS USB
+> esterno (`gps.source = "nmea"`) e, per l'RSSI, il fallback
+> `method="channel_status_level"` (livello grezzo tag `0x09`, da tarare).
 
 ## GPS esterno (consigliato)
 Un ricevitore GPS USB (`/dev/ttyACM0`) con `gps.source = "auto"` diventa la
@@ -115,7 +125,15 @@ sorgente principale quando ha un fix, con fallback al GPS della radio. Dà la
 posizione anche in analogico o con radio senza GPS, e sincronizza l'orologio del
 Pi (che offline non ha RTC).
 
-## Crediti
-Parser LRRP/ARS e transport Hytera USB sono portati dai moduli verificati sul
-campo di `ico88/raspradio` (`main.py`) e `ico88/DMR-Tracker` (`hytera_link.py`,
-`xcmp.py`).
+## Crediti e licenze dei riferimenti
+- Parser LRRP/ARS e transport Hytera USB: portati dai moduli verificati sul campo
+  di `ico88/raspradio` e `ico88/DMR-Tracker`.
+- Metodo RSSI Motorola (menu nascosto + DISPTXT) e opcode tasti/display:
+  ispirati a **nr23730/trboxcmp** — licenza **MIT** (riuso consentito con
+  attribuzione).
+- Struttura del Location Protocol Hytera (GPS + RSSI): studiata su
+  **OK-DMR/ok-dmrlib** — licenza **AGPL-3.0**. Qui è **riscritta da zero**: non è
+  incluso né linkato codice AGPL, così SiteSurvey non eredita l'AGPL.
+
+Scala coordinate LRRP (`lat·90/2³¹` con segno) e token posizione verificati per
+confronto con `ok-dmrlib` e con i dati di campo del DM4601e.

@@ -43,12 +43,18 @@ xcmp_max_attempts = 300    # ritenta finche' la challenge cade su un random noto
 [radio.motorola.xcmp_lookup]
 # "2dff77997feb0b64" = "bc8d9b98126d952d"
 
-# RSSI numerico Motorola: REVERSE-ENGINEERING, da tarare su hardware.
-# Procedura: sitesurvey probe --driver motorola --rssi-scan --beacon -n 20
+# RSSI numerico Motorola.
+#  disptxt_menu : entra nel menu RSSI nascosto (sequenza tasti) e legge il dBm
+#                 dal testo del display (metodo noto, progetto MIT trboxcmp).
+#                 Richiede xcmp_enabled=true + coppie xcmp_lookup valide.
+#  xcmp_notify  : decodifica un byte da una notifica XCMP (offset da tarare).
+#  none         : non misurato.
 [radio.motorola.rssi]
-method = "none"            # none | xcmp_notify
-notify_subop = 0xB40E      # notifica "RSSI_OR_SIGNAL"
-value_offset = 0           # offset del byte RSSI dopo il sotto-opcode
+method = "disptxt_menu"
+menu_sequence = ["left", "left", "left", "right", "right", "right"]
+text_regex = ""            # vuoto = cerca un numero -dd/-ddd nel testo display
+notify_subop = 0xB40E
+value_offset = 0
 value_len = 1
 signed = true
 scale = 1.0
@@ -56,15 +62,20 @@ offset = 0.0
 
 # --- Hytera (HRNP su USB bulk, NON rete) ----------------------------------
 [radio.hytera]
+radio_id = 0               # Radio ID della radio base (richiesto per le query LP)
+cai_network = 10
 [radio.hytera.usb]
 pid = ""                   # vuoto = primo device Hytera (VID 0x238B) trovato
 serial = ""                # serial della radio se ne colleghi piu' di una
 
-# RSSI numerico Hytera: dal channel-status esce un livello grezzo (tag 0x09).
-# method = channel_status_level lo converte in dBm con scale/offset DA TARARE.
+# RSSI numerico Hytera:
+#  lp                   : dal Location Protocol - GPS e RSSI nello stesso report
+#                         (StandardReportWithRSSI 0xA004). Richiede radio_id.
+#  channel_status_level : livello grezzo dal channel-status (tag 0x09), da tarare
+#  none                 : non misurato
 [radio.hytera.rssi]
-method = "none"            # none | channel_status_level
-scale = 1.0
+method = "lp"             # lp | channel_status_level | none
+scale = 1.0               # mappa il valore grezzo LP in dBm (da confermare)
 offset = 0.0
 
 [beacon]
@@ -88,9 +99,9 @@ track_field_radios = false  # registra anche le radio sul campo (per Radio ID)
 auto_start = false
 
 [gps]
-# Con Motorola il GPS arriva dalla radio (LRRP). Un GPS USB esterno e'
-# consigliato come backup e per sincronizzare l'orologio del Pi (no RTC).
-# Con Hytera il GPS via radio non e' ancora validato: usare "nmea".
+# Il GPS arriva dalla radio: Motorola via LRRP, Hytera via Location Protocol
+# (richiede radio_id). Un GPS USB esterno resta consigliato come backup e per
+# sincronizzare l'orologio del Pi (no RTC).
 source = "auto"            # radio | nmea | auto
 nmea_device = "/dev/ttyACM0"
 nmea_baud = 9600

@@ -44,6 +44,19 @@ class HyteraDriver(RadioDriver):
         link.open()
         link.connect()
         self.link = link
+        self._last_lp: dict | None = None
+        # Se useremo l'RSSI dal Location Protocol, attiviamo i report con RSSI.
+        if self.cfg.get("rssi", {}).get("method") == "lp" and self._radio_id():
+            try:
+                link.configure_rssi_reports(self._radio_id(), int(self.cfg.get("cai_network", 10)))
+            except Exception as e:  # noqa: BLE001
+                log.warning("config report RSSI LP fallita: %s", e)
+
+    def _radio_id(self) -> int:
+        try:
+            return int(self.cfg.get("radio_id", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     def close(self) -> None:
         if self.link:
@@ -76,21 +89,33 @@ class HyteraDriver(RadioDriver):
 
     # --- RSSI -------------------------------------------------------------
     def read_rssi(self) -> float | None:
-        st = self._status()
-        if not st:
-            return None
         rssi = self.cfg.get("rssi", {})
-        level = st.get("signal_level", 0)
-        if rssi.get("method") == "channel_status_level":
-            # Mappatura lineare livello grezzo -> dBm, DA TARARE su hardware.
-            scale = float(rssi.get("scale", 1.0))
-            offset = float(rssi.get("offset", 0.0))
-            if level <= 0:
-                return None if st.get("busy") else None
-            return -abs(level * scale + offset)
-        # Senza taratura restituiamo None per onesta': il livello grezzo e'
-        # comunque esposto nel campo diagnostico (vedi probe).
-        return None
+        method = rssi.get("method", "none")
+        scale = float(rssi.get("scale", 1.0))
+        offset = float(rssi.get("offset", 0.0))
+        if method == "lp":
+            # RSSI dal Location Protocol (report 0xA004/0xD004): GPS+RSSI insieme.
+            rep = self._query_lp()
+            if rep and rep.get("rssi_raw") is not None:
+                return -abs(rep["rssi_raw"] * scale + offset)
+            return None
+        if method == "channel_status_level":
+            st = self._status()
+            level = st.get("signal_level", 0) if st else 0
+            return -abs(level * scale + offset) if level > 0 else None
+        return None  # non tarato: onesto (il livello grezzo e' nel probe)
+
+    def _query_lp(self) -> dict | None:
+        if not self.link or not self._radio_id():
+            return None
+        try:
+            rep = self.link.query_location(self._radio_id(), int(self.cfg.get("cai_network", 10)))
+        except Exception as e:  # noqa: BLE001
+            self.close()
+            raise RadioError(f"LP query: {e}") from e
+        if rep:
+            self._last_lp = rep
+        return rep
 
     def signal_level(self) -> int:
         st = self._status(max_age=0.3)
@@ -114,9 +139,15 @@ class HyteraDriver(RadioDriver):
                 out.append(f"0x{op:04x}: errore {e}")
         return out
 
-    # --- GPS (non ancora validato) ---------------------------------------
+    # --- GPS via Location Protocol ---------------------------------------
     def get_location(self) -> GpsFix | None:
-        return None  # GPS via Hytera LP: formato da validare; usare GPS USB
+        if not self._radio_id():
+            return None  # senza radio_id non si puo' interrogare l'LP: usare GPS USB
+        rep = self._query_lp()
+        if not rep or "lat" not in rep:
+            return GpsFix(valid=False, source="radio")
+        return GpsFix(lat=rep.get("lat"), lon=rep.get("lon"), speed_kmh=rep.get("speed_kmh"),
+                      heading=rep.get("heading"), valid=rep.get("valid", False), source="radio")
 
     # --- Beacon -----------------------------------------------------------
     def send_beacon(self, seq: int, b: dict) -> bool:

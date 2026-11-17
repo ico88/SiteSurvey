@@ -114,6 +114,26 @@ def test_hytera_hrnp_checksum():
     assert hu._inet_checksum(frame) == 0  # il checksum include se stesso -> 0
 
 
+def test_hytera_lp_report_with_rssi():
+    # Location Protocol: GPS + RSSI insieme (StandardReportWithRSSI 0xA004)
+    gps = (b"A123519230394N4807.0380E01131.0000012.5084" + b"\x00" * 40)[:40]
+    payload = struct.pack(">I", 1) + hu.cai_ip_bytes(2621001) + b"\x00\x00" + gps + struct.pack("<h", -95)
+    hdap = hu.build_hdap(hu.HDAP_SERVICE["LP"], hu.LP_STANDARD_REPORT_RSSI, payload, reliable=True)
+    for frame in (hdap, hu.build_hrnp(hu.OP_DATA, 4, 0, 0x10, 0x20, 1, hdap)):
+        r = hu.parse_lp_report(frame)
+        assert r["radio_id"] == 2621001 and r["valid"] and r["rssi_raw"] == -95
+        assert r["lat"] == pytest.approx(48.1173, abs=1e-3)
+        assert r["lon"] == pytest.approx(11.516667, abs=1e-3)
+
+
+def test_hytera_lp_request_builder():
+    req = hu.build_lp_request(2621001)
+    assert req[0] == (hu.HDAP_SERVICE["LP"] | 0x80)
+    assert int.from_bytes(req[1:3], "big") == hu.LP_STANDARD_REQUEST
+    cfg = hu.build_lp_rssi_config(2621001)
+    assert int.from_bytes(cfg[1:3], "big") == hu.LP_RSSI_CONFIG_REQUEST
+
+
 # ---- XCMP (framing) ------------------------------------------------------
 def test_xcmp_pack_parse():
     pkt = xcmp.pack_std(0x000b, 0x00, 0x0002, b"\x00\x01\x00\x0e\xb4\x0e\x55")
@@ -127,6 +147,17 @@ def test_xcmp_challenge_response_frame():
     magic = b"\xff\xfc"
     body = magic + bytes.fromhex("2dff77997feb0b64")
     assert body[2:10].hex() in xcmp.DEFAULT_LOOKUP
+
+
+def test_xcmp_display_rssi_parse():
+    # RSSI Motorola letto dal testo del display (metodo menu nascosto)
+    s = xcmp.XcmpSession.__new__(xcmp.XcmpSession)
+    s.notifications = [(0xB401).to_bytes(2, "big") + b"\x00" * 8 + b"RSSI -101 dBm ch1"]
+    assert "-101" in " ".join(s.display_texts())
+    assert s.read_rssi_from_display() == -101.0
+    # un display senza RSSI non deve restituire numeri a caso
+    s.notifications = [(0xB401).to_bytes(2, "big") + b"Zona 1 Canale 5"]
+    assert s.read_rssi_from_display() is None
 
 
 # ---- NMEA ----------------------------------------------------------------

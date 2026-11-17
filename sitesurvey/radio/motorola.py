@@ -125,6 +125,7 @@ class MotorolaDriver(RadioDriver):
         self.data_sock: socket.socket | None = None
         self._connected = False
         self._info: dict = {}
+        self._rssi_menu_entered = False
 
     def connect(self) -> None:
         self.close()
@@ -137,9 +138,11 @@ class MotorolaDriver(RadioDriver):
             self.ars.start()
         self.data_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        # XCMP e' opzionale: serve solo per beacon PTT e reverse RSSI.
+        self._rssi_menu_entered = False
+        # XCMP e' opzionale: serve per beacon PTT e per la lettura RSSI.
         rssi = self.cfg.get("rssi", {})
-        need_xcmp = rssi.get("method") == "xcmp_notify" or self.cfg.get("xcmp_enabled", False)
+        need_xcmp = (rssi.get("method") in ("xcmp_notify", "disptxt_menu")
+                     or self.cfg.get("xcmp_enabled", False))
         if need_xcmp:
             try:
                 self.xcmp = XcmpSession(self.host, int(self.cfg.get("xcmp_port", 8002)),
@@ -206,32 +209,48 @@ class MotorolaDriver(RadioDriver):
                     pass
         return self.lrrp.field_fixes(max_age_s)
 
-    # --- RSSI (reverse-engineering) --------------------------------------
+    # --- RSSI --------------------------------------------------------------
     def read_rssi(self) -> float | None:
         rssi = self.cfg.get("rssi", {})
-        if rssi.get("method") != "xcmp_notify" or not (self.xcmp and self.xcmp.alive):
-            return None  # onesto: finche' il decode non e' tarato, nessun valore
-        subop = int(rssi.get("notify_subop", 0xB40E))
-        off = int(rssi.get("value_offset", 0))
-        n = int(rssi.get("value_len", 1))
-        signed = bool(rssi.get("signed", True))
-        scale = float(rssi.get("scale", 1.0))
-        offset = float(rssi.get("offset", 0.0))
-        # Cerca la notifica piu' recente col sotto-opcode atteso.
-        for frame in reversed(self.xcmp.notifications):
-            pos = frame.find(subop.to_bytes(2, "big"))
-            if pos < 0:
-                continue
-            raw = frame[pos + 2 + off:pos + 2 + off + n]
-            if len(raw) < n:
-                continue
-            v = int.from_bytes(raw, "big", signed=signed)
-            return -abs(v * scale + offset)
+        method = rssi.get("method", "none")
+        if not (self.xcmp and self.xcmp.alive):
+            return None
+        if method == "disptxt_menu":
+            # Metodo noto (trboxcmp, MIT): entra nel menu RSSI nascosto una volta,
+            # poi leggi il dBm dal testo del display che la radio trasmette.
+            if not self._rssi_menu_entered:
+                try:
+                    self.xcmp.enter_rssi_menu(rssi.get("menu_sequence") or None)
+                    self._rssi_menu_entered = True
+                    time.sleep(0.3)
+                except (RuntimeError, ValueError) as e:
+                    log.warning("ingresso menu RSSI fallito: %s", e)
+                    return None
+            return self.xcmp.read_rssi_from_display(rssi.get("text_regex", ""))
+        if method == "xcmp_notify":
+            subop = int(rssi.get("notify_subop", 0xB40E))
+            off = int(rssi.get("value_offset", 0))
+            n = int(rssi.get("value_len", 1))
+            signed = bool(rssi.get("signed", True))
+            scale = float(rssi.get("scale", 1.0))
+            offset = float(rssi.get("offset", 0.0))
+            for frame in reversed(self.xcmp.notifications):
+                pos = frame.find(subop.to_bytes(2, "big"))
+                if pos < 0:
+                    continue
+                raw = frame[pos + 2 + off:pos + 2 + off + n]
+                if len(raw) < n:
+                    continue
+                return -abs(int.from_bytes(raw, "big", signed=signed) * scale + offset)
         return None
 
     def rssi_probe_frames(self) -> list[str]:
-        """Restituisce le notifiche XCMP grezze (hex) per il reverse RSSI."""
-        return [f.hex() for f in (self.xcmp.notifications if self.xcmp else [])]
+        """Frame XCMP grezzi + testo del display, per diagnosticare l'RSSI."""
+        if not self.xcmp:
+            return []
+        out = [f"display: {t}" for t in self.xcmp.display_texts()[-5:]]
+        out += [f"frame: {f.hex()}" for f in self.xcmp.notifications[-5:]]
+        return out
 
     # --- Beacon -----------------------------------------------------------
     def send_beacon(self, seq: int, b: dict) -> bool:

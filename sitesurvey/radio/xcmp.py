@@ -14,6 +14,7 @@ configurabili.
 from __future__ import annotations
 
 import logging
+import re
 import socket
 import struct
 import threading
@@ -31,8 +32,20 @@ DEFAULT_LOOKUP = {
 PTT_SUBOP = 0x0415
 PTT_ON = bytes.fromhex("0100")
 PTT_OFF = bytes.fromhex("0200")
-# Sotto-opcode noti presenti nelle notifiche (per orientarsi nel reverse RSSI)
-SUB_RSSI_OR_SIGNAL = 0xB40E
+
+# --- Lettura RSSI Motorola: non c'e' uno status XCMP pulito. Il metodo noto
+# (progetto MIT nr23730/trboxcmp) e': entrare nel menu RSSI nascosto della radio
+# con una sequenza di tasti, poi leggere il numero dal testo del display, che la
+# radio trasmette via broadcast DISPTXT. Opcode da trboxcmp (MIT):
+DISPTXT_BCAST = 0xB401       # broadcast testo del display
+PINPUT_BCAST = 0xB405        # invio di un tasto fisico
+# Codici tasti (sottoinsieme)
+BTN = {"left": 0x80, "right": 0x82, "up": 0x87, "down": 0x88, "menu": 0x8B,
+       "back": 0x81, "ok": 0x55, "p1": 0xA0, "p2": 0xA1}
+# Sequenza per il menu RSSI nascosto: sinistra x3, destra x3
+RSSI_MENU_SEQUENCE = ["left", "left", "left", "right", "right", "right"]
+# Riconoscimento di un dBm nel testo del display (es. "-95", "RSSI -101dBm")
+_DBM_RE = re.compile(r"-?\d{2,3}")
 
 
 def pack_ext(pkt_type: int, cookie: bytes, body: bytes) -> bytes:
@@ -201,14 +214,59 @@ class XcmpSession:
                 if len(self.notifications) > self._max_notif:
                     self.notifications.pop(0)
 
-    def send_ptt(self, on: bool, ms: int = 500) -> None:
+    def _send_data_cmd(self, subop: int, payload: bytes) -> None:
+        """Invia un comando DATA XCMP (framing verificato in DMR-Tracker)."""
         if not self.sock:
             raise RuntimeError("XCMP non connesso")
-        payload = PTT_ON if on else PTT_OFF
         body_len = 2 + 1 + len(payload)
         inner = (struct.pack(">H", 0x000b) + bytes([0x01, 0x00]) + struct.pack(">H", 0x0006)
                  + struct.pack(">H", 0x0002) + struct.pack(">H", 0x0000)
-                 + struct.pack(">H", body_len) + struct.pack(">H", PTT_SUBOP)
+                 + struct.pack(">H", body_len) + struct.pack(">H", subop)
                  + bytes([len(payload)]) + payload)
         with self._lock:
             self.sock.sendall(struct.pack(">H", len(inner)) + inner)
+
+    def send_ptt(self, on: bool, ms: int = 500) -> None:
+        self._send_data_cmd(PTT_SUBOP, PTT_ON if on else PTT_OFF)
+
+    # --- lettura RSSI dal menu nascosto + display -------------------------
+    def press_button(self, name: str, hold_ms: int = 100) -> None:
+        """Simula la pressione di un tasto fisico (PINPUT). name in BTN."""
+        code = BTN.get(name)
+        if code is None:
+            raise ValueError(f"tasto sconosciuto: {name}")
+        # payload PINPUT: 00 00 00 + tasto + stato + 00 03 (da trboxcmp, MIT)
+        self._send_data_cmd(PINPUT_BCAST, bytes([0x00, 0x00, 0x00, code, 0x01, 0x00, 0x03]))
+        time.sleep(hold_ms / 1000)
+        self._send_data_cmd(PINPUT_BCAST, bytes([0x00, 0x00, 0x00, code, 0x00, 0x00, 0x03]))
+
+    def enter_rssi_menu(self, sequence=None) -> None:
+        """Naviga al menu RSSI nascosto (default: sinistra x3, destra x3)."""
+        for b in (sequence or RSSI_MENU_SEQUENCE):
+            self.press_button(b)
+            time.sleep(0.15)
+
+    def display_texts(self) -> list[str]:
+        """Estrae il testo dai broadcast DISPTXT raccolti."""
+        out = []
+        marker = DISPTXT_BCAST.to_bytes(2, "big")
+        for frame in self.notifications:
+            if marker in frame:
+                # testo = run ASCII/latin1 stampabili nel frame
+                txt = "".join(chr(b) if 32 <= b < 127 else " " for b in frame)
+                out.append(" ".join(txt.split()))
+        return out
+
+    def read_rssi_from_display(self, regex: str = "") -> float | None:
+        """Cerca un dBm nel testo del display (dopo enter_rssi_menu)."""
+        rx = re.compile(regex) if regex else _DBM_RE
+        for txt in reversed(self.display_texts()):
+            m = rx.search(txt)
+            if m:
+                try:
+                    v = float(m.group(1) if m.groups() else m.group(0))
+                except (ValueError, IndexError):
+                    continue
+                if -130 <= v <= -20:
+                    return v
+        return None

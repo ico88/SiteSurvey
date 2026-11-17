@@ -38,9 +38,15 @@ DEFAULTS: dict = {
             "xcmp_lookup": {},         # {"<random hex>": "<risposta hex>", ...}
             "cai_network": 12,
             "cai_group_network": 225,
-            # Reverse-engineering dell'RSSI numerico Motorola (DA TARARE).
+            # RSSI numerico Motorola:
+            #  disptxt_menu = entra nel menu RSSI nascosto (tasti) e legge il
+            #                 dBm dal testo del display (metodo noto, trboxcmp)
+            #  xcmp_notify  = decodifica una notifica XCMP (offset da tarare)
+            #  none         = non misurato
             "rssi": {
-                "method": "none",      # none | xcmp_notify
+                "method": "disptxt_menu",
+                "menu_sequence": ["left", "left", "left", "right", "right", "right"],
+                "text_regex": "",      # vuoto = cerca un numero -dd/-ddd nel display
                 "notify_subop": 0xB40E,
                 "value_offset": 0,
                 "value_len": 1,
@@ -51,9 +57,14 @@ DEFAULTS: dict = {
         },
         "hytera": {
             "usb": {"pid": "", "serial": ""},   # vuoto = primo device Hytera trovato
-            # Reverse-engineering dell'RSSI numerico Hytera (DA TARARE).
+            "radio_id": 0,             # Radio ID della radio base (per le query LP)
+            "cai_network": 10,
+            # RSSI numerico Hytera:
+            #  lp                    = dal Location Protocol (GPS+RSSI insieme, 0xA004)
+            #  channel_status_level  = livello grezzo dal channel-status (tag 0x09)
+            #  none                  = non misurato
             "rssi": {
-                "method": "none",      # none | channel_status_level
+                "method": "lp",        # lp | channel_status_level | none
                 "scale": 1.0,
                 "offset": 0.0,
             },
