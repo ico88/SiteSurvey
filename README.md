@@ -37,10 +37,16 @@ analogico). Il risultato è una **mappa di copertura reale**.
 
 ## Installazione sul Raspberry
 
+**Guida completa passo-passo (dalla SD al primo giro):**
+[docs/INSTALLAZIONE.md](docs/INSTALLAZIONE.md). In sintesi:
+
 ```bash
-git clone <questo repository> sitesurvey && cd sitesurvey
+# abilita SPI + overlay del TFT 3.5" (vedi docs/DISPLAY.md), poi:
+sudo apt install -y git
+git clone -b claude/exciting-einstein-8nr4ev https://github.com/ico88/SiteSurvey.git
+cd SiteSurvey
 sudo ./scripts/install.sh
-sudo nano /etc/sitesurvey/config.toml     # driver radio, chiave XNL, beacon...
+sudo nano /etc/sitesurvey/config.toml     # driver radio, display, beacon, GPS...
 sudo systemctl restart sitesurvey
 journalctl -u sitesurvey -f
 ```
