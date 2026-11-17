@@ -114,7 +114,7 @@ set_system_time = true
 # none     = nessun display
 driver = "fb"
 # --- TFT SPI (driver = "fb"), vedi docs/DISPLAY.md per il setup del pannello ---
-fb_device = "/dev/fb1"
+fb_device = "auto"         # auto = trova il TFT da solo; oppure /dev/fb0 o /dev/fb1
 bpp = 16                   # RGB565
 bgr = false                # true se rosso/blu appaiono invertiti
 rotate = 0                 # 0/90/180/270 secondo l'orientamento del pannello

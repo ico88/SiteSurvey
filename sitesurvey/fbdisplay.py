@@ -29,6 +29,59 @@ AMBER = (230, 170, 60)
 BLUE = (70, 130, 210)
 
 
+import glob
+
+# Marcatori nel "name" del framebuffer di un pannello SPI (non HDMI/DRM).
+_TFT_MARKERS = ("ili9", "flexfb", "fb_", "tft", "piscreen", "waveshare", "mhs",
+                "st77", "st75", "hx83", "mi0283", "ssd1351", "fbtft")
+_PRIMARY_MARKERS = ("vc4", "drm", "vga", "simple", "hdmi")
+
+
+def list_framebuffers() -> list[tuple[str, str, int, int, int]]:
+    """[(device, name, width, height, bpp)] per ogni /dev/fbN presente."""
+    out = []
+    for sysp in sorted(glob.glob("/sys/class/graphics/fb[0-9]*")):
+        name = os.path.basename(sysp)
+        dev = f"/dev/{name}"
+        if not os.path.exists(dev):
+            continue
+        try:
+            fbname = open(f"{sysp}/name").read().strip()
+        except OSError:
+            fbname = ""
+        w = h = bpp = 0
+        try:
+            w, h = (int(x) for x in open(f"{sysp}/virtual_size").read().strip().split(","))
+            bpp = int(open(f"{sysp}/bits_per_pixel").read().strip())
+        except (OSError, ValueError):
+            pass
+        out.append((dev, fbname, w, h, bpp))
+    return out
+
+
+def pick_framebuffer(preferred: str = "auto") -> str:
+    """Sceglie il framebuffer del TFT. Se `preferred` esiste ed e' esplicito, lo usa."""
+    if preferred and preferred != "auto" and os.path.exists(preferred):
+        return preferred
+    fbs = list_framebuffers()
+    if not fbs:
+        return preferred if preferred and preferred != "auto" else "/dev/fb1"
+    # 1) nome che indica un pannello SPI noto
+    for dev, name, w, h, bpp in fbs:
+        if any(m in name.lower() for m in _TFT_MARKERS):
+            return dev
+    # 2) risoluzione tipica di questi TFT (480x320 / 320x480)
+    for dev, name, w, h, bpp in fbs:
+        if {w, h} == {320, 480}:
+            return dev
+    # 3) un framebuffer che NON e' il primario HDMI/DRM
+    for dev, name, w, h, bpp in fbs:
+        if not any(m in name.lower() for m in _PRIMARY_MARKERS):
+            return dev
+    # 4) ultimo della lista (spesso il TFT quando c'e' anche l'HDMI)
+    return fbs[-1][0]
+
+
 def _fb_geometry(fbdev: str) -> tuple[int, int, int, int]:
     """(width, height, bpp, stride) letti da /sys, con fallback."""
     name = os.path.basename(fbdev)
@@ -115,6 +168,13 @@ class FbDisplay(threading.Thread):
         except ImportError:
             log.error("Pillow non installato: display framebuffer disabilitato")
             return
+        # diagnostica: elenca tutti i framebuffer trovati
+        for dev, name, w, h, bpp in list_framebuffers():
+            log.info("framebuffer %s name=%r %dx%d %dbpp", dev, name, w, h, bpp)
+        chosen = pick_framebuffer(self.fbdev)
+        if chosen != self.fbdev:
+            log.info("display: uso %s (fb_device era %r)", chosen, self.fbdev)
+        self.fbdev = chosen
         self.w, self.h, self.bpp, self.stride = _fb_geometry(self.fbdev)
         if not self.w:
             self.w = int(self.cfg.get("width", 480))

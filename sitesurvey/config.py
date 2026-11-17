@@ -110,7 +110,7 @@ DEFAULTS: dict = {
     "display": {
         "driver": "fb",                # fb | ssd1306 | sh1106 | none
         # --- TFT SPI a colori su framebuffer (driver = "fb"), es. 3.5" 480x320
-        "fb_device": "/dev/fb1",
+        "fb_device": "auto",           # auto = trova il TFT da solo (o /dev/fb0, /dev/fb1)
         "bpp": 16,                     # RGB565
         "bgr": False,                  # True se i colori appaiono invertiti R<->B
         "touch_enabled": True,         # tocca lo schermo per avviare/fermare
