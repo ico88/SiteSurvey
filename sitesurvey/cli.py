@@ -120,10 +120,23 @@ def cmd_probe(args) -> int:
                 fix = r.get_location()
             except RadioError as e:
                 fix = f"errore: {e}"
-            print(f"[{i + 1}] RSSI={rssi}  GPS={fix}")
+            extra = ""
+            if hasattr(r, "signal_level"):
+                try:
+                    extra = f"  busy={r.is_busy()} level={r.signal_level()}"
+                except RadioError as e:
+                    extra = f"  ({e})"
+            print(f"[{i + 1}] RSSI={rssi}  GPS={fix}{extra}")
+            if args.rssi_scan and hasattr(r, "rssi_probe_frames"):
+                for line in r.rssi_probe_frames():
+                    print(f"      frame: {line}")
             time.sleep(1)
     finally:
         r.close()
+    if args.rssi_scan:
+        print("\nPer tarare l'RSSI: ripeti con beacon ON vicino al ponte e lontano,\n"
+              "confronta i frame, individua il byte che cambia col segnale e impostalo\n"
+              "in [radio.<vendor>.rssi]. Vedi docs/PROTOCOLLI.md.")
     return 0
 
 
@@ -149,6 +162,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("probe", help="test di comunicazione con la radio")
     p.add_argument("-n", "--count", type=int, default=5)
     p.add_argument("--beacon", action="store_true", help="invia un beacon prima di ogni lettura")
+    p.add_argument("--rssi-scan", action="store_true", help="raccoglie i frame grezzi per tarare l'RSSI")
     p.add_argument("--driver", choices=["motorola", "hytera", "simulator"])
     p.add_argument("-v", "--verbose", action="store_true")
     p.set_defaults(fn=cmd_probe)

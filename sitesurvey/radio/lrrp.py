@@ -1,98 +1,87 @@
-"""MOTOTRBO LRRP (Location Request/Response Protocol), codifica binaria a token.
+"""MOTOTRBO LRRP (Location Request/Response Protocol).
 
-Usato per leggere il GPS interno della radio collegata via USB.
-Riferimento: decoder pubblici LRRP (es. DSD-FME), MOTOTRBO System Planner.
+Parser **verificato sul campo** con Motorola DM4601e, portato dai repository
+ico88/raspradio e ico88/DMR-Tracker. Usato per leggere il GPS della radio
+collegata via USB (rete RNDIS 192.168.10.x), sia su richiesta (immediate) sia
+in ascolto passivo dei report periodici che la radio invia su UDP 4001.
+
+Token verificati (DM4601e):
+  report 0x0D   TriggeredLocationReport
+  0x34 (5B)     timestamp            0x1F (4B) current-ts
+  0x55 (8B)     posizione: lat(4)+lon(4), NO altitudine
+  0x6C (2B BE)  velocita' orizzontale, unita' 1/100 m/s
+  0x56 (1B)     rotta, scala 0.125 gradi/bit (DA CONFERMARE: 1 byte a 0.125
+                arriva solo a ~32 gradi; su hardware verificare se e' invece
+                360/256 per bit. Il valore grezzo e' comunque conservato.)
+  0x23 (2B)     request-id (ignorato: il radio_id arriva dall'IP via ARS)
+
+Nota sulla scala: le radio emettono lat/lon come intero a 32 bit. Nei dati
+verificati (emisfero nord/est) l'interpretazione senza segno con scala
+180/2^32 e quella con segno (90/2^31) coincidono. Qui si usa quella con
+segno, cosi' il parser e' corretto anche per latitudini/longitudini negative.
 """
 from __future__ import annotations
 
 import calendar
 import struct
 
+# Tipi di messaggio
 IMMEDIATE_REQ = 0x05
 IMMEDIATE_RSP = 0x07
 TRIGGERED_START_REQ = 0x09
-TRIGGERED_START_RSP = 0x0B
 TRIGGERED_REPORT = 0x0D
-TRIGGERED_STOP_REQ = 0x0F
-TRIGGERED_STOP_RSP = 0x11
 
-TOK_REQUEST_ID = 0x22
-TOK_RESULT = 0x37
-TOK_RESULT_ALT = 0x38
-TOK_INFO_TIME = 0x34
+# Token verificati sul campo
+TOK_TIMESTAMP = 0x34        # 5 byte
+TOK_CURRENT_TS = 0x1F       # 4 byte
+TOK_REQUEST_ID = 0x23       # 2 byte (nella forma verificata)
+TOK_LOC_2D = 0x55           # 8 byte: lat(4)+lon(4)
+TOK_SPEED_HOR = 0x6C        # 2 byte BE, 1/100 m/s
+TOK_DIRECTION_HOR = 0x56    # 1 byte, 0.125 gradi/bit
+# Varianti note da altre firmware (gestite in modo tollerante)
 TOK_POINT_2D = 0x66
 TOK_POINT_3D = 0x69
-TOK_CIRCLE_2D = 0x51
-TOK_CIRCLE_3D = 0x54
-TOK_SPEED_HOR = 0x6C
-TOK_DIRECTION_HOR = 0x56
 
 RESULT_OK = 0x00
 
+# Scale con segno (coerenti coi dati field-verified per coordinate positive)
+_LAT_SCALE = 90.0 / (1 << 31)
+_LON_SCALE = 180.0 / (1 << 31)
 
-def encode_uintvar(v: int) -> bytes:
-    out = [v & 0x7F]
-    v >>= 7
-    while v:
-        out.append(0x80 | (v & 0x7F))
-        v >>= 7
-    return bytes(reversed(out))
-
-
-def decode_uintvar(buf: bytes, i: int) -> tuple[int, int]:
-    v = 0
-    while True:
-        b = buf[i]
-        i += 1
-        v = (v << 7) | (b & 0x7F)
-        if not b & 0x80:
-            return v, i
+# Richiesta "immediate location" usata in DMR-Tracker (seq ASCII variabile)
+_REQ_HEAD = bytes.fromhex("05092202")
+_REQ_TAIL = bytes.fromhex("5154625764")
 
 
-def _wrap(msg_type: int, body: bytes) -> bytes:
-    return bytes([msg_type]) + encode_uintvar(len(body)) + body
+def build_immediate_request(seq: int = 0x38) -> bytes:
+    """Richiesta immediata di posizione (formato DMR-Tracker/raspradio).
 
-
-def _req_id(request_id: int) -> bytes:
-    rid = struct.pack(">I", request_id & 0xFFFFFFFF)
-    return bytes([TOK_REQUEST_ID, len(rid)]) + rid
-
-
-def build_immediate_request(request_id: int) -> bytes:
-    # 0x51 0x40 = ret-info con lat/long/time richiesti
-    return _wrap(IMMEDIATE_REQ, _req_id(request_id) + bytes([0x51, 0x40]))
-
-
-def build_triggered_request(request_id: int, interval_s: int) -> bytes:
-    body = _req_id(request_id) + bytes([0x51, 0x40, 0x34, 0x31]) + encode_uintvar(interval_s)
-    return _wrap(TRIGGERED_START_REQ, body)
-
-
-def encode_lat(lat: float) -> bytes:
-    raw = int(round(abs(lat) * (1 << 31) / 90.0)) & 0x7FFFFFFF
-    if lat < 0:
-        raw |= 0x80000000
-    return struct.pack(">I", raw)
-
-
-def encode_lon(lon: float) -> bytes:
-    return struct.pack(">i", int(round(lon * (1 << 31) / 180.0)))
+    `seq` e' un contatore a 1 byte codificato in ASCII-hex dentro il pacchetto.
+    """
+    seq_ascii = f"{seq & 0xFF:02x}".encode("ascii")
+    return _REQ_HEAD + seq_ascii + _REQ_TAIL
 
 
 def decode_lat(b: bytes) -> float:
-    raw = struct.unpack(">I", b)[0]
-    lat = (raw & 0x7FFFFFFF) * 90.0 / (1 << 31)
-    return -lat if raw & 0x80000000 else lat
+    return round(struct.unpack(">i", b)[0] * _LAT_SCALE, 6)
 
 
 def decode_lon(b: bytes) -> float:
-    return struct.unpack(">i", b)[0] * 180.0 / (1 << 31)
+    return round(struct.unpack(">i", b)[0] * _LON_SCALE, 6)
+
+
+def encode_lat(lat: float) -> bytes:
+    return struct.pack(">i", int(round(lat / _LAT_SCALE)))
+
+
+def encode_lon(lon: float) -> bytes:
+    return struct.pack(">i", int(round(lon / _LON_SCALE)))
 
 
 def encode_time(epoch: float) -> bytes:
-    import time as _t
-    t = _t.gmtime(epoch)
-    v = (t.tm_year << 26) | (t.tm_mon << 22) | (t.tm_mday << 17) | (t.tm_hour << 12) | (t.tm_min << 6) | t.tm_sec
+    t = __import__("time").gmtime(epoch)
+    v = ((t.tm_year << 26) | (t.tm_mon << 22) | (t.tm_mday << 17)
+         | (t.tm_hour << 12) | (t.tm_min << 6) | t.tm_sec)
     return v.to_bytes(5, "big")
 
 
@@ -106,61 +95,66 @@ def decode_time(b: bytes) -> float | None:
         return None
 
 
-def build_point_response(request_id: int, lat: float, lon: float, alt: int | None = None,
-                         epoch: float | None = None, result: int = RESULT_OK) -> bytes:
-    """Costruisce una risposta (usato da simulatore e test)."""
-    body = _req_id(request_id)
-    if result != RESULT_OK:
-        body += bytes([TOK_RESULT]) + encode_uintvar(result)
-        return _wrap(IMMEDIATE_RSP, body)
-    if epoch is not None:
-        body += bytes([TOK_INFO_TIME]) + encode_time(epoch)
-    if alt is None:
-        body += bytes([TOK_POINT_2D]) + encode_lat(lat) + encode_lon(lon)
-    else:
-        body += bytes([TOK_POINT_3D]) + encode_lat(lat) + encode_lon(lon) + encode_uintvar(max(0, alt))
-    return _wrap(IMMEDIATE_RSP, body)
-
-
 def parse_message(data: bytes) -> dict:
-    """Decodifica una risposta/report LRRP. Restituisce un dict con i campi trovati."""
+    """Decodifica un report/risposta LRRP. Ritorna un dict con i campi trovati.
+
+    Chiavi possibili: type, lat, lon, speed_kmh (km/h), heading (gradi),
+    time (epoch UTC), result. Se e' un pacchetto valido ma senza coordinate,
+    result resta None e 'lat'/'lon' sono assenti (fix non disponibile).
+    """
     if len(data) < 2:
         raise ValueError("pacchetto LRRP troppo corto")
     out: dict = {"type": data[0]}
-    length, i = decode_uintvar(data, 1)
-    body = data[i:i + length]
-    j = 0
-    try:
-        while j < len(body):
-            tok = body[j]
-            j += 1
-            if tok == TOK_REQUEST_ID:
-                n = body[j]
-                out["request_id"] = int.from_bytes(body[j + 1:j + 1 + n], "big")
-                j += 1 + n
-            elif tok in (TOK_RESULT, TOK_RESULT_ALT):
-                out["result"], j = decode_uintvar(body, j)
-            elif tok == TOK_INFO_TIME:
-                out["time"] = decode_time(body[j:j + 5])
-                j += 5
-            elif tok in (TOK_POINT_2D, TOK_POINT_3D, TOK_CIRCLE_2D, TOK_CIRCLE_3D):
-                out["lat"] = decode_lat(body[j:j + 4])
-                out["lon"] = decode_lon(body[j + 4:j + 8])
-                j += 8
-                if tok in (TOK_CIRCLE_2D, TOK_CIRCLE_3D):
-                    out["radius"], j = decode_uintvar(body, j)
-                if tok in (TOK_POINT_3D, TOK_CIRCLE_3D):
-                    out["alt"], j = decode_uintvar(body, j)
-            elif tok == TOK_SPEED_HOR:
-                ip, j = decode_uintvar(body, j)
-                out["speed_kmh"] = ip * 3.6  # m/s -> km/h (parte intera)
-                break  # ufloatvar: parte frazionaria non standardizzata, stop qui
-            elif tok == TOK_DIRECTION_HOR:
-                out["heading"] = body[j] * 2.0
-                j += 1
-            else:
-                break  # token sconosciuto: ci fermiamo, i dati gia' letti restano validi
-    except IndexError:
-        pass
-    out.setdefault("result", RESULT_OK if "lat" in out else None)
+    i = 2  # salta [tipo][len/flags]
+    n = len(data)
+    while i < n:
+        tok = data[i]
+        i += 1
+        if tok == TOK_TIMESTAMP and i + 5 <= n:
+            out["time"] = decode_time(data[i:i + 5])
+            i += 5
+        elif tok == TOK_CURRENT_TS and i + 4 <= n:
+            i += 4
+        elif tok == TOK_REQUEST_ID and i + 2 <= n:
+            out["request_id"] = int.from_bytes(data[i:i + 2], "big")
+            i += 2
+        elif tok in (TOK_LOC_2D, TOK_POINT_2D) and i + 8 <= n:
+            out["lat"] = decode_lat(data[i:i + 4])
+            out["lon"] = decode_lon(data[i + 4:i + 8])
+            i += 8
+        elif tok == TOK_POINT_3D and i + 8 <= n:
+            out["lat"] = decode_lat(data[i:i + 4])
+            out["lon"] = decode_lon(data[i + 4:i + 8])
+            i += 8
+            # altitudine uintvar: la saltiamo in modo tollerante
+            while i < n and data[i] & 0x80:
+                i += 1
+            if i < n:
+                i += 1
+        elif tok == TOK_SPEED_HOR and i + 2 <= n:
+            out["speed_kmh"] = round(struct.unpack(">H", data[i:i + 2])[0] / 100.0 * 3.6, 1)
+            i += 2
+        elif tok == TOK_DIRECTION_HOR and i + 1 <= n:
+            out["heading"] = round(data[i] * 0.125, 1)
+            i += 1
+        else:
+            i += 1  # token sconosciuto: avanza di 1 (tollerante, come field parser)
+    if "lat" in out and "lon" in out:
+        out.setdefault("result", RESULT_OK)
+    else:
+        out.setdefault("result", None)
     return out
+
+
+def build_triggered_report(lat: float, lon: float, epoch: float | None = None,
+                           speed_ms: float | None = None, heading: float | None = None) -> bytes:
+    """Costruisce un report 0x0D (per simulatore e test), nel formato verificato."""
+    body = bytearray([TRIGGERED_REPORT, 0x00])
+    if epoch is not None:
+        body += bytes([TOK_TIMESTAMP]) + encode_time(epoch)
+    body += bytes([TOK_LOC_2D]) + encode_lat(lat) + encode_lon(lon)
+    if speed_ms is not None:
+        body += bytes([TOK_SPEED_HOR]) + struct.pack(">H", int(round(speed_ms * 100)) & 0xFFFF)
+    if heading is not None:
+        body += bytes([TOK_DIRECTION_HOR, int(round(heading / 0.125)) & 0xFF])
+    return bytes(body)

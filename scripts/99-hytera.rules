@@ -1,0 +1,2 @@
+# Accesso non-root al device di controllo Hytera (HRNP su USB bulk)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="238b", MODE="0660", GROUP="plugdev"

@@ -22,38 +22,37 @@ DEFAULTS: dict = {
         "reconnect_interval_s": 5.0,
         "motorola": {
             "host": "192.168.10.1",
-            "xnl_port": 8002,
-            "xnl_key": [0, 0, 0, 0],   # 4 word a 32 bit, dal Motorola ADK
-            "xnl_delta": 0,
-            "timeout_s": 3.0,
             "lrrp_port": 4001,
             "lrrp_local_port": 4001,
-            "rssi_status_code": 0x02,
-            "rssi_scale": 1.0,
-            "rssi_offset": 0.0,
-            "ptt_opcode": 0x0415,
-            "ptt_key_data": "0101",
-            "ptt_dekey_data": "0100",
+            "ars_enabled": True,
+            "ars_port": 4005,
+            # XCMP (TCP 8002): serve SOLO per beacon PTT e per il reverse RSSI.
+            # Auth challenge/response a lookup (nessuna chiave ADK).
+            "xcmp_enabled": False,
+            "xcmp_port": 8002,
+            "xcmp_max_attempts": 300,
+            "xcmp_lookup": {},         # {"<random hex>": "<risposta hex>", ...}
             "cai_network": 12,
             "cai_group_network": 225,
+            # Reverse-engineering dell'RSSI numerico Motorola (DA TARARE).
+            "rssi": {
+                "method": "none",      # none | xcmp_notify
+                "notify_subop": 0xB40E,
+                "value_offset": 0,
+                "value_len": 1,
+                "signed": True,
+                "scale": 1.0,
+                "offset": 0.0,
+            },
         },
         "hytera": {
-            "host": "192.168.10.1",
-            "transport": "udp",        # udp | tcp
-            "rcp_port": 30005,
-            "lp_port": 30003,
-            "timeout_s": 3.0,
-            "radio_id": 1,             # ID della radio collegata (per richiesta LP)
-            "cai_network": 10,
-            "rssi_opcode": 0,          # 0 = non configurato. Vedi docs/PROTOCOLLI.md
-            "rssi_request_data": "",
-            "rssi_reply_offset": 0,
-            "rssi_reply_len": 2,
-            "rssi_scale": 1.0,
-            "rssi_offset": 0.0,
-            "ptt_opcode": 0x0041,
-            "ptt_key_data": "",
-            "ptt_dekey_data": "",
+            "usb": {"pid": "", "serial": ""},   # vuoto = primo device Hytera trovato
+            # Reverse-engineering dell'RSSI numerico Hytera (DA TARARE).
+            "rssi": {
+                "method": "none",      # none | channel_status_level
+                "scale": 1.0,
+                "offset": 0.0,
+            },
         },
         "simulator": {
             "site_lat": 45.4642,

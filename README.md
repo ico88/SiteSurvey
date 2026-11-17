@@ -94,16 +94,21 @@ sitesurvey -c config/simulator.toml run
 
 ## Stato dei protocolli (importante)
 
-Vedi [docs/PROTOCOLLI.md](docs/PROTOCOLLI.md). In sintesi:
+Questo codice **riusa i moduli già verificati sul campo** nei repo
+`ico88/raspradio` e `ico88/DMR-Tracker`. Vedi [docs/PROTOCOLLI.md](docs/PROTOCOLLI.md). In sintesi:
 
-- **Motorola**: GPS (LRRP), beacon dati, RSSI e info radio (XNL/XCMP) sono implementati
-  e testati contro una radio emulata. Per leggere l'RSSI serve la **chiave XNL del
-  programma Motorola ADK**, che non può essere distribuita.
-- **Hytera**: trasporto HRNP, GPS (LP) e beacon sono implementati. L'**opcode RCP per l'RSSI
-  va configurato** dalla documentazione dell'SDK Hytera, perché dipende da modello e
-  firmware.
-- Il software non è ancora stato provato su radio reali: per la prima messa in servizio usa
-  `sitesurvey probe -v`.
+- **Motorola GPS/ARS**: verificato sul campo (DM4601e). LRRP su UDP 4001 (ascolto
+  passivo + richiesta), ARS su UDP 4005. Nessuna licenza né chiave.
+- **Motorola beacon**: dato DMR via UDP (CAI) o PTT via XCMP. L'XCMP usa auth
+  challenge/response a **lookup** (nessuna chiave ADK): servono le coppie da
+  Wireshark, in `[radio.motorola.xcmp_lookup]`.
+- **Hytera**: transport HRNP su **USB bulk** verificato sul campo (MD785i): stato
+  canale, busy/carrier, beacon PTT. GPS via radio non ancora validato → GPS USB.
+- **RSSI numerico in dBm**: è la parte **ancora da reverse-engineerare** su
+  hardware (Motorola notifica `b40e`; Hytera livello `0x09` / opcode candidati).
+  Si tara con `sitesurvey probe --rssi-scan`; finché non è tarato il campo RSSI
+  resta vuoto. Vedi docs/PROTOCOLLI.md.
+- Prima messa in servizio: `sitesurvey probe -v` (e `--rssi-scan` per l'RSSI).
 
 ## Struttura
 

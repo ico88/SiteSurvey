@@ -6,13 +6,18 @@ cd "$(dirname "$0")/.."
 [ "$(id -u)" -eq 0 ] || { echo "eseguire con sudo"; exit 1; }
 
 apt-get update
-apt-get install -y python3-venv python3-dev i2c-tools libjpeg-dev zlib1g-dev libfreetype6-dev
+apt-get install -y python3-venv python3-dev i2c-tools libjpeg-dev zlib1g-dev libfreetype6-dev \
+    libusb-1.0-0   # libusb: controllo Hytera via USB (pyusb)
 
 # I2C per il display
 if command -v raspi-config >/dev/null; then raspi-config nonint do_i2c 0 || true; fi
 
 id sitesurvey >/dev/null 2>&1 || useradd --system --home /var/lib/sitesurvey --shell /usr/sbin/nologin sitesurvey
-for g in gpio i2c dialout; do getent group "$g" >/dev/null && usermod -aG "$g" sitesurvey; done
+for g in gpio i2c dialout plugdev; do getent group "$g" >/dev/null && usermod -aG "$g" sitesurvey; done
+
+# regola udev: accesso non-root al device di controllo Hytera (USB VID 238b)
+install -m 0644 scripts/99-hytera.rules /etc/udev/rules.d/99-hytera.rules 2>/dev/null || true
+udevadm control --reload-rules 2>/dev/null || true
 
 python3 -m venv /opt/sitesurvey/venv
 /opt/sitesurvey/venv/bin/pip install --upgrade pip

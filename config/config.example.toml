@@ -8,76 +8,93 @@ control_socket = "/run/sitesurvey/control.sock"
 
 [radio]
 driver = "motorola"        # motorola | hytera | simulator
-mode = "dmr"               # dmr | analog (solo informativo nei dati + scelta beacon)
+mode = "dmr"               # dmr | analog
 reconnect_interval_s = 5
 
+# --- Motorola MOTOTRBO (USB-RNDIS, radio 192.168.10.1) --------------------
+# GPS via LRRP (UDP 4001) e ARS (UDP 4005): NON serve licenza ne' chiave.
+# XCMP (TCP 8002) serve SOLO per il beacon PTT e per il reverse dell'RSSI;
+# usa auth challenge/response a lookup (nessuna chiave ADK).
 [radio.motorola]
-host = "192.168.10.1"      # IP della radio sull'interfaccia USB
-xnl_port = 8002
-# Chiave e delta XNL forniti da Motorola (programma MOTOTRBO ADK / Application Partner).
-# Senza questi valori non e' possibile leggere l'RSSI.
-xnl_key = [0x00000000, 0x00000000, 0x00000000, 0x00000000]
-xnl_delta = 0x00000000
-lrrp_port = 4001           # servizio Location della radio (abilitare GPS e "Location" in CPS)
+host = "192.168.10.1"
+lrrp_port = 4001
 lrrp_local_port = 4001
-rssi_status_code = 0x02    # XCMP Radio Status: condizione RSSI
-rssi_scale = 1.0
-rssi_offset = 0.0
+ars_enabled = true
+ars_port = 4005
 cai_network = 12           # rete CAI individuale (CPS: Network > CAI Network)
 cai_group_network = 225    # rete CAI gruppi
+xcmp_enabled = false       # true per beacon PTT / lettura RSSI via XCMP
+xcmp_port = 8002
+xcmp_max_attempts = 300    # ritenta finche' la challenge cade su un random noto
 
+# Coppie challenge/response note (da catture Wireshark con auth riuscita).
+# Senza queste, xcmp non autentica. Formato: random_hex = risposta_hex
+[radio.motorola.xcmp_lookup]
+# "2dff77997feb0b64" = "bc8d9b98126d952d"
+
+# RSSI numerico Motorola: REVERSE-ENGINEERING, da tarare su hardware.
+# Procedura: sitesurvey probe --driver motorola --rssi-scan --beacon -n 20
+[radio.motorola.rssi]
+method = "none"            # none | xcmp_notify
+notify_subop = 0xB40E      # notifica "RSSI_OR_SIGNAL"
+value_offset = 0           # offset del byte RSSI dopo il sotto-opcode
+value_len = 1
+signed = true
+scale = 1.0
+offset = 0.0
+
+# --- Hytera (HRNP su USB bulk, NON rete) ----------------------------------
 [radio.hytera]
-host = "192.168.10.1"
-transport = "udp"          # udp | tcp
-rcp_port = 30005
-lp_port = 30003
-radio_id = 1               # ID della radio collegata
-cai_network = 10
-# Opcode RCP per la lettura RSSI: dipende da modello/firmware, vedi docs/PROTOCOLLI.md
-rssi_opcode = 0
-rssi_request_data = ""
-rssi_reply_offset = 0
-rssi_reply_len = 2
+[radio.hytera.usb]
+pid = ""                   # vuoto = primo device Hytera (VID 0x238B) trovato
+serial = ""                # serial della radio se ne colleghi piu' di una
+
+# RSSI numerico Hytera: dal channel-status esce un livello grezzo (tag 0x09).
+# method = channel_status_level lo converte in dBm con scale/offset DA TARARE.
+[radio.hytera.rssi]
+method = "none"            # none | channel_status_level
+scale = 1.0
+offset = 0.0
 
 [beacon]
 enabled = true
-# data: pacchetto dati DMR verso target_id (fa agganciare il ripetitore)
-# ptt : breve trasmissione (analogico) - richiede opcode PTT configurato
-# none: misura passiva (canale con portante continua)
-kind = "data"
-target_id = 1              # ID radio/console di destinazione del beacon
+kind = "data"              # data (dato DMR) | ptt (TX breve) | none
+target_id = 1
 target_is_group = false
 target_port = 4007
 payload = "SITESURVEY"
-settle_ms = 300            # attesa dopo il beacon prima di leggere l'RSSI
+settle_ms = 300
 ptt_ms = 500
 
 [survey]
-interval_s = 2.0           # un campione ogni N secondi durante la registrazione
-min_distance_m = 0         # >0: registra solo se ci si e' spostati di almeno N metri
-rssi_samples = 3           # letture RSSI per campione
+interval_s = 2.0
+min_distance_m = 0
+rssi_samples = 3
 rssi_sample_spacing_ms = 150
-rssi_aggregate = "max"     # max | mean | median
+rssi_aggregate = "max"
 require_gps_fix = true
-auto_start = false         # avvia la registrazione all'accensione
+auto_start = false
 
 [gps]
-source = "auto"            # radio | nmea | auto (NMEA se presente, altrimenti radio)
+# Con Motorola il GPS arriva dalla radio (LRRP). Un GPS USB esterno e'
+# consigliato come backup e per sincronizzare l'orologio del Pi (no RTC).
+# Con Hytera il GPS via radio non e' ancora validato: usare "nmea".
+source = "auto"            # radio | nmea | auto
 nmea_device = "/dev/ttyACM0"
 nmea_baud = 9600
 max_age_s = 5
-set_system_time = true     # imposta l'orologio del Pi dal GPS (il Pi non ha RTC)
+set_system_time = true
 
 [display]
 driver = "ssd1306"         # ssd1306 | sh1106 | none
 i2c_port = 1
 i2c_address = 0x3C
 width = 128
-height = 32                # PiOLED 128x32; 64 per display 128x64
+height = 32
 rotate = 0
-button_gpio = 5            # pulsante start/stop verso GND; -1 = nessuno
-led_gpio = -1              # LED di registrazione opzionale
+button_gpio = 5
+led_gpio = -1
 
 [export]
-thresholds = [-85, -95, -105, -115]   # Ottimo / Buono / Discreto / Scarso / Critico
+thresholds = [-85, -95, -105, -115]
 grid_m = 50

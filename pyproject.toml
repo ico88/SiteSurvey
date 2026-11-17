@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Display OLED + pulsante sul Raspberry Pi
-pi = ["luma.oled>=3.8", "gpiozero>=1.6", "lgpio; python_version >= '3.11'"]
+pi = ["luma.oled>=3.8", "gpiozero>=1.6", "lgpio; python_version >= '3.11'", "pyusb>=1.2"]
 test = ["pytest"]
 
 [project.scripts]
