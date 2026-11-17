@@ -9,11 +9,15 @@ apt-get update
 apt-get install -y python3-venv python3-dev i2c-tools libjpeg-dev zlib1g-dev libfreetype6-dev \
     libusb-1.0-0   # libusb: controllo Hytera via USB (pyusb)
 
-# I2C per il display
-if command -v raspi-config >/dev/null; then raspi-config nonint do_i2c 0 || true; fi
+# SPI per il TFT 3.5" (framebuffer) e I2C per gli OLED
+if command -v raspi-config >/dev/null; then
+  raspi-config nonint do_spi 0 || true
+  raspi-config nonint do_i2c 0 || true
+fi
 
 id sitesurvey >/dev/null 2>&1 || useradd --system --home /var/lib/sitesurvey --shell /usr/sbin/nologin sitesurvey
-for g in gpio i2c dialout plugdev; do getent group "$g" >/dev/null && usermod -aG "$g" sitesurvey; done
+# input = touch del TFT; plugdev = USB Hytera; gpio/i2c/dialout = display/GPS
+for g in gpio i2c spi dialout plugdev input video; do getent group "$g" >/dev/null && usermod -aG "$g" sitesurvey; done
 
 # regola udev: accesso non-root al device di controllo Hytera (USB VID 238b)
 install -m 0644 scripts/99-hytera.rules /etc/udev/rules.d/99-hytera.rules 2>/dev/null || true

@@ -30,9 +30,9 @@ analogico). Il risultato è una **mappa di copertura reale**.
 | Componente | Note |
 |---|---|
 | Raspberry Pi 2 (o successivo) | Raspberry Pi OS Lite (Bookworm o Bullseye) |
-| Display | Adafruit **PiOLED 128x32** (SSD1306, I2C 0x3C) o altri SSD1306/SH1106 |
-| Pulsante | Tra **GPIO5** (pin 29) e **GND** (pin 30). Il pin si cambia in `display.button_gpio` |
-| Radio | MOTOTRBO (con chiave XNL) o Hytera, cavo USB di programmazione/dati |
+| Display | **TFT SPI 3.5" 480x320** (ILI9486 + touch XPT2046) → driver `fb`, vedi [docs/DISPLAY.md](docs/DISPLAY.md). In alternativa OLED I2C SSD1306/SH1106 |
+| Comando start/stop | **Touch** del TFT (tocca lo schermo), oppure pulsante su **GPIO5** (`display.button_gpio`) |
+| Radio | MOTOTRBO o Hytera, cavo USB di programmazione/dati |
 | GPS USB (opz.) | Consigliato come backup e per sincronizzare l'orologio del Pi |
 
 ## Installazione sul Raspberry
@@ -49,13 +49,10 @@ Per la prima installazione serve internet (pacchetti pip). Dopo, il sistema lavo
 
 ## Uso sul campo
 
-1. Accendi il Pi con la radio collegata. Il display mostra:
-   ```
-   RADIO OK DM4600 DMR
-   GPS FIX 9sat radio
-   STOP  [premi=REC]
-   ```
-2. Premi il pulsante per iniziare: `REC*00:12:34 n356`. Ripremi per fermare.
+1. Accendi il Pi con la radio collegata. Il display TFT mostra a colori lo stato
+   RADIO (verde/rosso), GPS (fix/sat) e la registrazione, con tempo, numero di
+   campioni e ultimo RSSI.
+2. **Tocca lo schermo** (o premi il pulsante GPIO) per iniziare; di nuovo per fermare.
 3. Ogni sessione viene salvata in `/var/lib/sitesurvey/sessions/AAAAMMGG-hhmmss/`.
 
 Da terminale (SSH):
@@ -122,7 +119,8 @@ sitesurvey/
   surveyor.py                          ciclo di misura
   gps.py                               GPS NMEA esterno
   recorder.py                          salvataggio sessioni
-  display.py                           OLED + pulsante
+  display.py                           OLED I2C + pulsante GPIO
+  fbdisplay.py                         TFT SPI a colori (framebuffer) + touch
   control.py                           socket di controllo
   export.py  templates/map.html        mappe HTML/KML/GeoJSON
 systemd/sitesurvey.service

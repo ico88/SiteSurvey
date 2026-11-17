@@ -108,13 +108,22 @@ DEFAULTS: dict = {
         "set_system_time": False,
     },
     "display": {
-        "driver": "ssd1306",           # ssd1306 | sh1106 | none
+        "driver": "fb",                # fb | ssd1306 | sh1106 | none
+        # --- TFT SPI a colori su framebuffer (driver = "fb"), es. 3.5" 480x320
+        "fb_device": "/dev/fb1",
+        "bpp": 16,                     # RGB565
+        "bgr": False,                  # True se i colori appaiono invertiti R<->B
+        "touch_enabled": True,         # tocca lo schermo per avviare/fermare
+        "touch_device": "",            # "" = autodetect (XPT2046)
+        "touch_debounce_s": 1.0,
+        # --- OLED I2C (driver = "ssd1306"/"sh1106")
         "i2c_port": 1,
         "i2c_address": 0x3C,
-        "width": 128,
-        "height": 32,
-        "rotate": 0,
-        "button_gpio": 5,              # -1 per disabilitare
+        # width/height: OLED (128x32); per "fb" si leggono da /dev/fb1
+        "width": 480,
+        "height": 320,
+        "rotate": 0,                   # 0/90/180/270 (orientamento pannello)
+        "button_gpio": 5,              # pulsante GPIO opzionale; -1 per disabilitare
         "led_gpio": -1,
     },
     "export": {

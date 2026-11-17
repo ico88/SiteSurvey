@@ -110,3 +110,17 @@ class Display(threading.Thread):
         with canvas(self.device) as draw:
             for i, text in enumerate(lines[:n]):
                 draw.text((0, i * step - 1), text, fill="white")
+
+
+def make_display(cfg: dict, surveyor):
+    """Sceglie il backend display in base a cfg['driver'].
+
+    ssd1306 | sh1106 -> OLED I2C (luma.oled)
+    fb               -> TFT SPI a colori su framebuffer (es. 3.5" 480x320)
+    none             -> nessun display (ma il pulsante GPIO resta attivo)
+    """
+    drv = cfg.get("driver", "none")
+    if drv == "fb":
+        from .fbdisplay import FbDisplay
+        return FbDisplay(cfg, surveyor)
+    return Display(cfg, surveyor)

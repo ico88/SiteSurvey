@@ -18,7 +18,7 @@ def _setup_logging(level: str) -> None:
 
 def cmd_run(args) -> int:
     from .control import ControlServer
-    from .display import Display
+    from .display import make_display
     from .surveyor import Surveyor
 
     cfg = load_config(args.config)
@@ -26,7 +26,7 @@ def cmd_run(args) -> int:
     sv = Surveyor(cfg)
     ctl = ControlServer(cfg["general"]["control_socket"], sv)
     ctl.start()
-    disp = Display(cfg["display"], sv)
+    disp = make_display(cfg["display"], sv)
     disp.start()
 
     def _term(*_):

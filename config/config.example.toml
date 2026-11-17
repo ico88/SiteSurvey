@@ -109,14 +109,25 @@ max_age_s = 5
 set_system_time = true
 
 [display]
-driver = "ssd1306"         # ssd1306 | sh1106 | none
+# fb       = TFT SPI a colori su framebuffer (es. 3.5" 480x320 ILI9486 + touch)
+# ssd1306  = OLED I2C 128x32/64 (in quel caso width=128, height=32)
+# none     = nessun display
+driver = "fb"
+# --- TFT SPI (driver = "fb"), vedi docs/DISPLAY.md per il setup del pannello ---
+fb_device = "/dev/fb1"
+bpp = 16                   # RGB565
+bgr = false                # true se rosso/blu appaiono invertiti
+rotate = 0                 # 0/90/180/270 secondo l'orientamento del pannello
+touch_enabled = true       # tocca lo schermo per avviare/fermare la registrazione
+touch_device = ""          # "" = autodetect (XPT2046)
+touch_debounce_s = 1.0
+# --- OLED I2C (driver = "ssd1306"/"sh1106") ---
 i2c_port = 1
 i2c_address = 0x3C
-width = 128
-height = 32
-rotate = 0
-button_gpio = 5
-led_gpio = -1
+width = 480                # TFT: letto da /dev/fb1; OLED: metti 128
+height = 320               # OLED: metti 32
+button_gpio = 5            # pulsante GPIO opzionale verso GND; -1 = nessuno
+led_gpio = -1              # LED di registrazione opzionale
 
 [export]
 thresholds = [-85, -95, -105, -115]

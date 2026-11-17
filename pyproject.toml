@@ -13,8 +13,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Display OLED + pulsante sul Raspberry Pi
-pi = ["luma.oled>=3.8", "gpiozero>=1.6", "lgpio; python_version >= '3.11'", "pyusb>=1.2"]
+# Display + pulsante/touch + USB sul Raspberry Pi
+pi = [
+    "Pillow>=9",                 # rendering del display (fb e OLED)
+    "numpy>=1.21",               # conversione veloce RGB565 per il TFT SPI
+    "evdev>=1.6",                # touch XPT2046 del TFT 3.5"
+    "luma.oled>=3.8",            # alternativa: OLED I2C SSD1306/SH1106
+    "gpiozero>=1.6",
+    "lgpio; python_version >= '3.11'",
+    "pyusb>=1.2",                # controllo Hytera via USB
+]
 test = ["pytest"]
 
 [project.scripts]
