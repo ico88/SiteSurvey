@@ -13,10 +13,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Display + pulsante/touch + USB sul Raspberry Pi
+# Display + pulsante/touch + USB sul Raspberry Pi.
+# numpy NON e' qui di proposito: velocizza il TFT ma il display ha un fallback
+# puro-Python, e su Pi 2 compilarlo da sorgente e' lentissimo. Va installato
+# da apt (python3-numpy) e il venv lo vede con --system-site-packages.
 pi = [
     "Pillow>=9",                 # rendering del display (fb e OLED)
-    "numpy>=1.21",               # conversione veloce RGB565 per il TFT SPI
     "evdev>=1.6",                # touch XPT2046 del TFT 3.5"
     "luma.oled>=3.8",            # alternativa: OLED I2C SSD1306/SH1106
     "gpiozero>=1.6",

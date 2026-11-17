@@ -6,8 +6,14 @@ cd "$(dirname "$0")/.."
 [ "$(id -u)" -eq 0 ] || { echo "eseguire con sudo"; exit 1; }
 
 apt-get update
+# Pacchetti precompilati da apt per le dipendenze "pesanti" (niente compilazione
+# da sorgente): su Raspberry Pi 2 compilare numpy richiederebbe decine di minuti
+# e potrebbe esaurire la RAM. Il venv userà questi via --system-site-packages.
 apt-get install -y python3-venv python3-dev i2c-tools libjpeg-dev zlib1g-dev libfreetype6-dev \
-    libusb-1.0-0   # libusb: controllo Hytera via USB (pyusb)
+    libusb-1.0-0 \
+    python3-numpy python3-pil python3-serial python3-evdev python3-usb || true
+# python3-lgpio solo dove disponibile (Bookworm/trixie)
+apt-get install -y python3-lgpio 2>/dev/null || true
 
 # SPI per il TFT 3.5" (framebuffer) e I2C per gli OLED
 if command -v raspi-config >/dev/null; then
@@ -23,9 +29,12 @@ for g in gpio i2c spi dialout plugdev input video; do getent group "$g" >/dev/nu
 install -m 0644 scripts/99-hytera.rules /etc/udev/rules.d/99-hytera.rules 2>/dev/null || true
 udevadm control --reload-rules 2>/dev/null || true
 
-python3 -m venv /opt/sitesurvey/venv
+# venv con accesso ai pacchetti di sistema (numpy/Pillow/evdev/pyserial da apt):
+# pip non li ricompila, installa solo cio' che manca (luma.oled, gpiozero, pyusb).
+python3 -m venv --system-site-packages /opt/sitesurvey/venv
 /opt/sitesurvey/venv/bin/pip install --upgrade pip
-/opt/sitesurvey/venv/bin/pip install ".[pi]"
+# --prefer-binary: usa i wheel quando ci sono, evita build da sorgente inutili.
+/opt/sitesurvey/venv/bin/pip install --prefer-binary ".[pi]"
 
 install -d -m 0755 /etc/sitesurvey
 [ -f /etc/sitesurvey/config.toml ] || install -m 0644 config/config.example.toml /etc/sitesurvey/config.toml

@@ -236,6 +236,7 @@ di tensione perde al massimo gli ultimi secondi.)
 | Nessun fix GPS | all'aperto, attendi il primo fix; o collega un GPS USB (`source="auto"`) |
 | RSSI vuoto | va tarato: `sitesurvey probe --rssi-scan` (vedi docs/PROTOCOLLI.md) |
 | Permessi negati sui comandi | usa `sudo` (il socket di controllo è riservato al servizio) |
+| `install.sh` fermo minuti su "Preparing metadata"/numpy | sta compilando numpy da sorgente. Non serve: `sudo apt install -y python3-numpy` e usa l'installer aggiornato (venv con `--system-site-packages`). Ctrl-C e rilancia. |
 
 ## Aggiornare in seguito
 
