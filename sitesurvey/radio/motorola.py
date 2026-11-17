@@ -24,39 +24,57 @@ import time
 from ..models import GpsFix
 from . import lrrp
 from .ars import ArsListener
-from .base import RadioDriver, RadioError, cai_ip
+from .base import RadioDriver, RadioError, cai_ip, rid_from_cai_ip
 from .xcmp import XcmpSession
 
 log = logging.getLogger(__name__)
 
 
-class LrrpListener(threading.Thread):
-    """Ascolta UDP 4001: aggiorna l'ultimo fix e consente la richiesta attiva."""
+BASE_ID = "base"
 
-    def __init__(self, host: str, port: int, local_port: int):
+
+class LrrpListener(threading.Thread):
+    """Ascolta UDP 4001 e tiene il GPS PER radio (base + radio sul campo).
+
+    I report della radio collegata arrivano dall'host locale (192.168.10.1) e
+    sono etichettati 'base'. I report via etere arrivano dall'IP CAI della radio
+    sul campo (es. 12.x.y.z): il Radio ID si ricava dall'IP (rid_from_cai_ip),
+    cosi' ogni radio resta separata anche se ce ne sono molte.
+    """
+
+    def __init__(self, host: str, port: int, local_port: int, request_template: str = ""):
         super().__init__(name="lrrp", daemon=True)
         self.host, self.port, self.local_port = host, port, local_port
+        self.request_template = request_template
         self._lock = threading.Lock()
-        self._fix: GpsFix | None = None
-        self._last_ip: str | None = None
+        self._fixes: dict[str, GpsFix] = {}   # radio_id ("base"/"<id>") -> fix
         self.sock: socket.socket | None = None
         self._stop = threading.Event()
         self._seq = 0x38
 
-    def fix(self) -> GpsFix | None:
-        with self._lock:
-            return GpsFix(**vars(self._fix)) if self._fix else None
+    def _key_for(self, ip: str) -> str:
+        if ip == self.host:
+            return BASE_ID
+        rid = rid_from_cai_ip(ip)
+        return str(rid) if rid is not None else ip
 
-    def last_ip(self) -> str | None:
+    def base_fix(self) -> GpsFix | None:
         with self._lock:
-            return self._last_ip
+            f = self._fixes.get(BASE_ID)
+            return GpsFix(**vars(f)) if f else None
 
-    def request(self) -> None:
+    def field_fixes(self, max_age_s: float) -> dict[str, GpsFix]:
+        with self._lock:
+            return {rid: GpsFix(**vars(f)) for rid, f in self._fixes.items()
+                    if rid != BASE_ID and f.is_fresh(max_age_s)}
+
+    def request(self, target_ip: str | None = None) -> None:
         if not self.sock:
             return
         self._seq = (self._seq + 0x09) & 0xFF
         try:
-            self.sock.sendto(lrrp.build_immediate_request(self._seq), (self.host, self.port))
+            self.sock.sendto(lrrp.build_immediate_request(self._seq, self.request_template),
+                             (target_ip or self.host, self.port))
         except OSError as e:
             raise RadioError(f"LRRP request: {e}") from e
 
@@ -85,11 +103,12 @@ class LrrpListener(threading.Thread):
                 continue
             if "lat" not in msg:
                 continue  # pacchetto valido ma senza fix (radio in interno)
+            key = self._key_for(addr[0])
             with self._lock:
-                self._last_ip = addr[0]
-                self._fix = GpsFix(lat=msg["lat"], lon=msg["lon"],
-                                   speed_kmh=msg.get("speed_kmh"), heading=msg.get("heading"),
-                                   valid=True, source="radio", gps_time=msg.get("time"))
+                self._fixes[key] = GpsFix(
+                    lat=msg["lat"], lon=msg["lon"], speed_kmh=msg.get("speed_kmh"),
+                    heading=msg.get("heading"), valid=True, source="radio",
+                    gps_time=msg.get("time"))
         if self.sock:
             self.sock.close()
 
@@ -110,7 +129,8 @@ class MotorolaDriver(RadioDriver):
     def connect(self) -> None:
         self.close()
         self.lrrp = LrrpListener(self.host, int(self.cfg["lrrp_port"]),
-                                 int(self.cfg["lrrp_local_port"]))
+                                 int(self.cfg["lrrp_local_port"]),
+                                 request_template=self.cfg.get("lrrp_request_template", ""))
         self.lrrp.start()
         if self.cfg.get("ars_enabled", True):
             self.ars = ArsListener(int(self.cfg.get("ars_port", 4005)))
@@ -157,14 +177,34 @@ class MotorolaDriver(RadioDriver):
 
     # --- GPS --------------------------------------------------------------
     def get_location(self) -> GpsFix | None:
+        """GPS della radio base collegata. Richiesta attiva, salvo passivo-only."""
         if not self.lrrp:
             raise RadioError("radio non connessa")
-        try:
+        if not self.cfg.get("lrrp_passive_only", False):
             self.lrrp.request()
-        except RadioError:
-            raise
-        fix = self.lrrp.fix()
+        fix = self.lrrp.base_fix()
         return fix if fix else GpsFix(valid=False, source="radio")
+
+    def field_locations(self, max_age_s: float = 10.0) -> dict[str, GpsFix]:
+        """GPS delle radio sul campo (via LRRP etere), per Radio ID.
+
+        Se `poll_field_radios` e' attivo e l'ARS conosce delle radio online, le
+        interroga; in ogni caso restituisce i fix freschi gia' ricevuti.
+        """
+        if not self.lrrp:
+            return {}
+        if self.cfg.get("poll_field_radios", False) and self.ars:
+            net = int(self.cfg["cai_network"])
+            for r in self.ars.online_radios():
+                try:
+                    rid = int(r["radio_id"])
+                except (ValueError, KeyError):
+                    continue
+                try:
+                    self.lrrp.request(cai_ip(rid, net))
+                except (RadioError, ValueError):
+                    pass
+        return self.lrrp.field_fixes(max_age_s)
 
     # --- RSSI (reverse-engineering) --------------------------------------
     def read_rssi(self) -> float | None:

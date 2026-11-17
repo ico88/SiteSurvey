@@ -17,10 +17,21 @@ reconnect_interval_s = 5
 # usa auth challenge/response a lookup (nessuna chiave ADK).
 [radio.motorola]
 host = "192.168.10.1"
+base_radio_id = ""         # Radio ID della radio base (etichetta i campioni "base")
 lrrp_port = 4001
 lrrp_local_port = 4001
+# GPS della radio base: richiesta immediata (default) o solo report periodici.
+lrrp_passive_only = false  # true = ascolto passivo, niente richiesta attiva
+# Formato del pacchetto di richiesta LRRP. Vuoto = formato di default.
+# Per usare il formato ESATTO di un programma che gia' funziona: catturalo con
+# Wireshark e incollalo qui in hex; "{seq}" = contatore a 1 byte in ASCII-hex.
+lrrp_request_template = ""
 ars_enabled = true
 ars_port = 4005
+# "Entrambe insieme": oltre alla base, registra anche le radio sul campo che
+# inviano GPS via etere (ognuna separata per Radio ID). Con poll_field_radios
+# le radio viste online dall'ARS vengono anche interrogate attivamente.
+poll_field_radios = false
 cai_network = 12           # rete CAI individuale (CPS: Network > CAI Network)
 cai_group_network = 225    # rete CAI gruppi
 xcmp_enabled = false       # true per beacon PTT / lettura RSSI via XCMP
@@ -73,6 +84,7 @@ rssi_samples = 3
 rssi_sample_spacing_ms = 150
 rssi_aggregate = "max"
 require_gps_fix = true
+track_field_radios = false  # registra anche le radio sul campo (per Radio ID)
 auto_start = false
 
 [gps]

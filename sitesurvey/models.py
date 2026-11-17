@@ -27,7 +27,8 @@ class GpsFix:
 
 
 SAMPLE_FIELDS = [
-    "timestamp", "gps_time", "lat", "lon", "alt", "speed_kmh", "heading",
+    "timestamp", "gps_time", "radio_id", "role",
+    "lat", "lon", "alt", "speed_kmh", "heading",
     "gps_valid", "sats", "hdop", "gps_source",
     "rssi_dbm", "rssi_min", "rssi_max", "rssi_n",
     "beacon_seq", "beacon_ok", "mode", "vendor",
@@ -55,6 +56,8 @@ class Sample:
     beacon_ok: bool
     mode: str
     vendor: str
+    radio_id: str = ""      # Radio ID della radio misurata ("" = base/sconosciuto)
+    role: str = "base"      # base (radio collegata) | field (radio sul campo)
 
     def row(self) -> list:
         out = []

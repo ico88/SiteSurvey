@@ -39,6 +39,28 @@ Il GPS funziona senza XCMP e senza chiavi: basta abilitare GPS e "Location"/
 passivo) e risponde alla richiesta immediata. In più l'ARS su 4005 dice quali
 radio sono accese e mappa IP→Radio ID.
 
+#### Base + radio sul campo (topologia "entrambe insieme")
+Il GPS è tracciato **per Radio ID**:
+- i report della **radio base** collegata arrivano dall'host locale
+  (`192.168.10.1`) → etichetta `base`;
+- i report via etere delle **radio sul campo** arrivano dal loro IP CAI
+  (`12.x.y.z`): il Radio ID si ricava dall'IP, così ogni radio resta separata.
+
+Con `survey.track_field_radios = true` ogni ciclo registra un campione `base`
+(GPS base + RSSI downlink della base) **e** un campione `field` per ogni radio
+sul campo con fix fresco. Nella mappa la copertura (griglia + statistiche) è
+calcolata **solo sulla base** (downlink pulito); le radio sul campo compaiono
+come marcatori a rombo separati per Radio ID. L'RSSI uplink per-radio è un
+reverse a parte (quale evento `b4xx` porta il livello del chiamante): finché non
+è risolto, i punti `field` hanno RSSI vuoto.
+
+#### Formato della richiesta LRRP da Wireshark
+Se catturi con Wireshark il pacchetto di richiesta di un programma che già
+funziona, incollalo in `lrrp_request_template` (hex). Il segnaposto `{seq}` viene
+sostituito col contatore a 1 byte in ASCII-hex. Così il formato esatto si adatta
+alla tua radio/firmware senza toccare il codice. Con `lrrp_passive_only = true`
+non si invia nulla e si usano solo i report periodici configurati nel CPS.
+
 ### Auth XCMP (solo per beacon PTT e RSSI)
 La radio manda una challenge `[magic 2B][random 8B]`; il random si ripete con
 periodo ~170 connessioni. Per ogni random noto si conosce la risposta (da

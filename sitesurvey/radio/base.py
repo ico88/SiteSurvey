@@ -52,6 +52,21 @@ def cai_ip(radio_id: int, network: int) -> str:
     return f"{network}.{(radio_id >> 16) & 0xFF}.{(radio_id >> 8) & 0xFF}.{radio_id & 0xFF}"
 
 
+def rid_from_cai_ip(ip: str) -> int | None:
+    """Ricava il Radio ID da un IP CAI (<network>.<id 24 bit>). None se non valido."""
+    parts = ip.split(".")
+    if len(parts) != 4:
+        return None
+    try:
+        a, b, c, d = (int(p) for p in parts)
+    except ValueError:
+        return None
+    # il primo ottetto e' la rete CAI (12/225 Motorola, 10 Hytera): lo scartiamo
+    if not all(0 <= x <= 255 for x in (b, c, d)):
+        return None
+    return (b << 16) | (c << 8) | d
+
+
 def hexbytes(s: str) -> bytes:
     s = (s or "").replace(" ", "").replace(":", "")
     return bytes.fromhex(s) if s else b""

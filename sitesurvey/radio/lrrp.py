@@ -53,11 +53,21 @@ _REQ_HEAD = bytes.fromhex("05092202")
 _REQ_TAIL = bytes.fromhex("5154625764")
 
 
-def build_immediate_request(seq: int = 0x38) -> bytes:
-    """Richiesta immediata di posizione (formato DMR-Tracker/raspradio).
+def build_immediate_request(seq: int = 0x38, template: str = "") -> bytes:
+    """Richiesta immediata di posizione.
 
-    `seq` e' un contatore a 1 byte codificato in ASCII-hex dentro il pacchetto.
+    Default: formato DMR-Tracker/raspradio (`seq` = contatore 1 byte in ASCII-hex).
+    Se `template` e' fornito (hex catturato con Wireshark da un programma che gia'
+    funziona), lo si usa tale e quale, sostituendo l'eventuale segnaposto `{seq}`
+    con il contatore in ASCII-hex. Cosi' il formato esatto si cambia da config,
+    senza toccare il codice.
     """
+    if template:
+        t = template.strip().replace(" ", "").replace(":", "")
+        if "{seq}" in template:
+            t = template.strip().replace(" ", "").replace(":", "").replace(
+                "{seq}", f"{seq & 0xFF:02x}")
+        return bytes.fromhex(t)
     seq_ascii = f"{seq & 0xFF:02x}".encode("ascii")
     return _REQ_HEAD + seq_ascii + _REQ_TAIL
 

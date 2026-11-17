@@ -53,7 +53,8 @@
     <div id="legend"></div>
     <h2>Visualizza</h2>
     <label><input type="checkbox" id="showGrid" checked> Griglia (mediana)</label>
-    <label><input type="checkbox" id="showPts" checked> Punti di misura</label>
+    <label><input type="checkbox" id="showPts" checked> Punti base (radio collegata)</label>
+    <label id="fieldRow" style="display:none"><input type="checkbox" id="showField" checked> Radio sul campo <span id="fieldCount" style="color:var(--muted)"></span></label>
     <label><input type="checkbox" id="showTiles"> Sfondo OpenStreetMap (richiede internet)</label>
   </aside>
 </div>
@@ -74,7 +75,7 @@ function levelOf(v) {
   return D.legend[D.thresholds.length];
 }
 function fit() {
-  const pts = D.samples; if (!pts.length) { cx = lon2x(12.5, zoom); cy = lat2y(42, zoom); return; }
+  const pts = D.samples.concat(D.field || []); if (!pts.length) { cx = lon2x(12.5, zoom); cy = lat2y(42, zoom); return; }
   let a = 90, b = -90, c = 180, d = -180;
   for (const p of pts) { a = Math.min(a, p.lat); b = Math.max(b, p.lat); c = Math.min(c, p.lon); d = Math.max(d, p.lon); }
   for (zoom = 18; zoom > 2; zoom--) {
@@ -121,6 +122,17 @@ function drawData() {
       g.lineWidth = 1; g.strokeStyle = "rgba(0,0,0,.45)"; g.stroke();
     }
   }
+  const field = D.field || [];
+  if (field.length && $("showField").checked) {
+    const r = zoom >= 16 ? 6 : 5;
+    for (const p of field) {
+      const [x, y] = toScreen(p.lat, p.lon); if (x < -8 || y < -8 || x > W + 8 || y > H + 8) continue;
+      g.beginPath();                                     // rombo per distinguerle dalla base
+      g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath();
+      g.fillStyle = p.rssi === null ? "#8a8f98" : levelOf(p.rssi).color; g.fill();
+      g.lineWidth = 1.5; g.strokeStyle = "#111"; g.stroke();
+    }
+  }
 }
 function draw() { drawTiles(); drawData(); }
 function setZoom(nz, mx = W / 2, my = H / 2) {
@@ -133,11 +145,13 @@ map.addEventListener("pointerup", () => { drag = null; map.classList.remove("dra
 map.addEventListener("pointermove", e => {
   const rect = map.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
   if (drag) { cx -= e.clientX - drag[0]; cy -= e.clientY - drag[1]; drag = [e.clientX, e.clientY]; draw(); tip.style.display = "none"; return; }
-  let best = null, bd = 100;
-  for (const p of D.samples) { const [x, y] = toScreen(p.lat, p.lon); const d = (x - mx) ** 2 + (y - my) ** 2; if (d < bd) { bd = d; best = p; } }
-  if (best && $("showPts").checked) {
+  let best = null, bd = 100, isField = false;
+  if ($("showPts").checked) for (const p of D.samples) { const [x, y] = toScreen(p.lat, p.lon); const d = (x - mx) ** 2 + (y - my) ** 2; if (d < bd) { bd = d; best = p; isField = false; } }
+  if ($("showField").checked) for (const p of (D.field || [])) { const [x, y] = toScreen(p.lat, p.lon); const d = (x - mx) ** 2 + (y - my) ** 2; if (d < bd) { bd = d; best = p; isField = true; } }
+  if (best) {
     const t = best.t ? new Date(best.t * 1000).toLocaleTimeString() : "";
-    tip.innerHTML = `<b>${best.rssi === null ? "Nessun segnale" : best.rssi.toFixed(1) + " dBm"}</b> · ${levelOf(best.rssi).name}<br>${best.lat.toFixed(5)}, ${best.lon.toFixed(5)} · ${t}`;
+    const who = isField ? `<b>Radio ${best.radio_id || "?"}</b> (campo)<br>` : "";
+    tip.innerHTML = `${who}<b>${best.rssi === null ? "Nessun segnale" : best.rssi.toFixed(1) + " dBm"}</b> · ${levelOf(best.rssi).name}<br>${best.lat.toFixed(5)}, ${best.lon.toFixed(5)} · ${t}`;
     tip.style.display = "block"; tip.style.left = (mx + 12) + "px"; tip.style.top = (my + 12) + "px";
   } else tip.style.display = "none";
 });
@@ -147,7 +161,11 @@ $("zin").onclick = e => { e.stopPropagation(); setZoom(zoom + 1); };
 $("zout").onclick = e => { e.stopPropagation(); setZoom(zoom - 1); };
 $("zfit").onclick = e => { e.stopPropagation(); fit(); draw(); };
 for (const b of ["zin", "zout", "zfit"]) $(b).addEventListener("pointerdown", e => e.stopPropagation());
-for (const id of ["showGrid", "showPts", "showTiles"]) $(id).onchange = draw;
+for (const id of ["showGrid", "showPts", "showField", "showTiles"]) $(id).onchange = draw;
+if ((D.field || []).length) {
+  $("fieldRow").style.display = "flex";
+  $("fieldCount").textContent = `(${D.field.length} punti, ${(D.radios || []).length} radio)`;
+}
 window.addEventListener("resize", () => { resize(); draw(); });
 
 // pannello

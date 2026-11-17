@@ -22,8 +22,12 @@ DEFAULTS: dict = {
         "reconnect_interval_s": 5.0,
         "motorola": {
             "host": "192.168.10.1",
+            "base_radio_id": "",       # Radio ID della radio base (etichetta campioni)
             "lrrp_port": 4001,
             "lrrp_local_port": 4001,
+            "lrrp_passive_only": False,  # True = solo report periodici, niente richiesta
+            "lrrp_request_template": "",  # hex da Wireshark; {seq} = contatore ASCII-hex
+            "poll_field_radios": False,   # interroga le radio online viste dall'ARS
             "ars_enabled": True,
             "ars_port": 4005,
             # XCMP (TCP 8002): serve SOLO per beacon PTT e per il reverse RSSI.
@@ -81,6 +85,7 @@ DEFAULTS: dict = {
         "rssi_sample_spacing_ms": 150,
         "rssi_aggregate": "max",      # max | mean | median
         "require_gps_fix": True,
+        "track_field_radios": False,  # registra anche le radio sul campo (per Radio ID)
         "auto_start": False,
         "fsync_every": 10,
     },

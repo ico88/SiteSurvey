@@ -5,7 +5,7 @@ import pytest
 from sitesurvey.gps import NmeaGps, parse_nmea
 from sitesurvey.radio import lrrp
 from sitesurvey.radio.ars import parse_ars
-from sitesurvey.radio.base import RadioError, aggregate, cai_ip
+from sitesurvey.radio.base import RadioError, aggregate, cai_ip, rid_from_cai_ip
 from sitesurvey.radio import hytera_usb as hu
 from sitesurvey.radio import xcmp
 
@@ -56,6 +56,19 @@ def test_lrrp_request_format():
     req = lrrp.build_immediate_request(0x38)
     assert req.startswith(bytes.fromhex("05092202"))
     assert req.endswith(bytes.fromhex("5154625764"))
+
+
+def test_lrrp_request_template():
+    # formato sostituibile da Wireshark, con segnaposto {seq} in ASCII-hex
+    assert lrrp.build_immediate_request(0x41, "05 09 22 {seq} 51").hex() == "05092241 51".replace(" ", "")
+    assert lrrp.build_immediate_request(1, "DEADBEEF").hex() == "deadbeef"
+
+
+def test_rid_from_cai_ip():
+    assert rid_from_cai_ip("12.1.2.3") == 0x010203
+    assert rid_from_cai_ip(cai_ip(2621001, 12)) == 2621001
+    assert rid_from_cai_ip("12.40.0") is None
+    assert rid_from_cai_ip("x.y.z.w") is None
 
 
 # ---- ARS -----------------------------------------------------------------

@@ -205,17 +205,24 @@ class Surveyor:
             self._radio_lost(e)
             return
         rssi = aggregate(values, sc["rssi_aggregate"])
-        s = Sample(timestamp=time.time(), gps_time=fix.gps_time, lat=fix.lat if valid else None,
-                   lon=fix.lon if valid else None, alt=fix.alt, speed_kmh=fix.speed_kmh,
-                   heading=fix.heading, gps_valid=valid, sats=fix.sats, hdop=fix.hdop,
-                   gps_source=fix.source, rssi_dbm=rssi,
-                   rssi_min=min(values) if values else None, rssi_max=max(values) if values else None,
-                   rssi_n=len(values), beacon_seq=self._seq, beacon_ok=beacon_ok,
-                   mode=self.cfg["radio"]["mode"], vendor=self.radio.vendor)
+        base_id = str(self.cfg["radio"].get(self.cfg["radio"]["driver"], {}).get("base_radio_id", "") or "")
+        s = self._make_sample(fix, valid, rssi, values, beacon_ok, radio_id=base_id, role="base")
+        rows = [s]
+        # Radio sul campo (topologia "entrambe insieme"): un campione per radio
+        # con fix fresco. L'RSSI uplink per-radio e' un reverse a parte: None.
+        if sc.get("track_field_radios", False) and hasattr(self.radio, "field_locations"):
+            try:
+                for rid, ffix in self.radio.field_locations(float(self.cfg["gps"]["max_age_s"])).items():
+                    rows.append(self._make_sample(ffix, True, None, [], beacon_ok,
+                                                   radio_id=rid, role="field"))
+            except RadioError as e:
+                self._radio_lost(e)
+                return
         with self._rec_lock:
             if not self.recorder:
                 return
-            self.recorder.write(s)
+            for row in rows:
+                self.recorder.write(row)
             n = self.recorder.count
         if valid:
             self._last_pos = (fix.lat, fix.lon)
@@ -223,3 +230,15 @@ class Surveyor:
             self.state.samples = n
             self.state.last_rssi = rssi
             self.state.message = ""
+
+    def _make_sample(self, fix, valid, rssi, values, beacon_ok, radio_id="", role="base") -> Sample:
+        return Sample(
+            timestamp=time.time(), gps_time=fix.gps_time,
+            lat=fix.lat if valid else None, lon=fix.lon if valid else None,
+            alt=fix.alt, speed_kmh=fix.speed_kmh, heading=fix.heading,
+            gps_valid=valid, sats=fix.sats, hdop=fix.hdop, gps_source=fix.source,
+            rssi_dbm=rssi, rssi_min=min(values) if values else None,
+            rssi_max=max(values) if values else None, rssi_n=len(values),
+            beacon_seq=self._seq, beacon_ok=beacon_ok,
+            mode=self.cfg["radio"]["mode"], vendor=self.radio.vendor,
+            radio_id=radio_id, role=role)

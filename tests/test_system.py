@@ -5,7 +5,8 @@ import time
 from sitesurvey.config import DEFAULTS, _merge
 from sitesurvey.control import ControlServer, send_command
 from sitesurvey.display import status_lines
-from sitesurvey.export import export_session, grid, level, load_samples
+from sitesurvey.export import (export_session, grid, level, load_samples, split_roles,
+                               to_geojson, to_html)
 from sitesurvey.surveyor import Surveyor
 
 
@@ -66,6 +67,36 @@ def test_level_and_grid():
     assert len(cells) == 2
     full = [c for c in cells if c["n"] == 2][0]
     assert full["rssi"] == -85
+
+
+def test_field_radios_separate_in_export(tmp_path):
+    # base (downlink) + due radio sul campo con RSSI non ancora misurato (None)
+    import csv
+    from sitesurvey.models import SAMPLE_FIELDS
+    d = tmp_path / "s"
+    d.mkdir()
+    with (d / "samples.csv").open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(SAMPLE_FIELDS)
+        rows = [
+            {"timestamp": 1, "lat": 45.0, "lon": 9.0, "rssi_dbm": -80, "role": "base", "radio_id": "100"},
+            {"timestamp": 2, "lat": 45.001, "lon": 9.001, "rssi_dbm": -90, "role": "base", "radio_id": "100"},
+            {"timestamp": 3, "lat": 45.02, "lon": 9.02, "rssi_dbm": "", "role": "field", "radio_id": "200"},
+            {"timestamp": 4, "lat": 45.03, "lon": 9.03, "rssi_dbm": "", "role": "field", "radio_id": "201"},
+        ]
+        for r in rows:
+            w.writerow([r.get(k, "") for k in SAMPLE_FIELDS])
+    base, field = split_roles(load_samples(d))
+    assert len(base) == 2 and len(field) == 2
+    assert {s["radio_id"] for s in field} == {"200", "201"}
+    # la griglia/copertura si calcola solo sulla base
+    cells = grid(base, 50)
+    assert cells and all(c["rssi"] is not None for c in cells)
+    gj = to_geojson(base, cells, [-85, -95, -105, -115], field)
+    roles = {ft["properties"].get("role") for ft in gj["features"] if ft["geometry"]["type"] == "Point"}
+    assert roles == {"base", "field"}
+    html = to_html(base, cells, [-85, -95, -105, -115], "t", field)
+    assert '"field":[' in html and '"radios":["200","201"]' in html
 
 
 def test_status_lines():

@@ -46,8 +46,16 @@ def load_samples(path: str | Path) -> list[dict]:
                 continue
             out.append({"t": _f(r["timestamp"]), "lat": lat, "lon": lon,
                         "rssi": _f(r.get("rssi_dbm")), "sats": r.get("sats") or None,
-                        "seq": r.get("beacon_seq")})
+                        "seq": r.get("beacon_seq"),
+                        "radio_id": r.get("radio_id") or "", "role": r.get("role") or "base"})
     return out
+
+
+def split_roles(samples: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Separa i campioni della base (copertura downlink) da quelli sul campo."""
+    base = [s for s in samples if s.get("role", "base") != "field"]
+    field = [s for s in samples if s.get("role") == "field"]
+    return base, field
 
 
 def grid(samples: list[dict], cell_m: float) -> list[dict]:
@@ -80,12 +88,18 @@ def stats(samples: list[dict], thresholds) -> dict:
             "median": statistics.median(vals) if vals else None, "levels": counts}
 
 
-def to_geojson(samples, cells, thresholds) -> dict:
+def to_geojson(samples, cells, thresholds, field=None) -> dict:
     feats = []
     for s in samples:
         name, color = level(s["rssi"], thresholds)
         feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [s["lon"], s["lat"]]},
-                      "properties": {"rssi_dbm": s["rssi"], "level": name, "color": color, "time": s["t"]}})
+                      "properties": {"rssi_dbm": s["rssi"], "level": name, "color": color, "time": s["t"],
+                                     "role": "base"}})
+    for s in (field or []):
+        name, color = level(s["rssi"], thresholds)
+        feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [s["lon"], s["lat"]]},
+                      "properties": {"rssi_dbm": s["rssi"], "level": name, "color": color, "time": s["t"],
+                                     "role": "field", "radio_id": s.get("radio_id", "")}})
     for c in cells:
         name, color = level(c["rssi"], thresholds)
         ring = [[c["lon0"], c["lat0"]], [c["lon1"], c["lat0"]], [c["lon1"], c["lat1"]],
@@ -101,7 +115,7 @@ def _kml_color(hex_rgb: str, alpha: str = "ff") -> str:
     return f"{alpha}{b}{g}{r}"
 
 
-def to_kml(samples, cells, thresholds, title: str) -> str:
+def to_kml(samples, cells, thresholds, title: str, field=None) -> str:
     styles = []
     for name, color in LEVELS + [NO_SIGNAL]:
         sid = name.replace(" ", "_")
@@ -127,18 +141,30 @@ def to_kml(samples, cells, thresholds, title: str) -> str:
         polys.append(f'<Placemark><name>{escape(val)} ({c["n"]})</name>'
                      f'<styleUrl>#g_{name.replace(" ", "_")}</styleUrl><Polygon><outerBoundaryIs><LinearRing>'
                      f'<coordinates>{coords}</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>')
+    fpts = []
+    for s in (field or []):
+        name, _ = level(s["rssi"], thresholds)
+        val = "nessun segnale" if s["rssi"] is None else f"{s['rssi']:.1f} dBm"
+        rid = s.get("radio_id", "")
+        fpts.append(f'<Placemark><name>Radio {escape(rid)}: {escape(val)}</name>'
+                    f'<styleUrl>#p_{name.replace(" ", "_")}</styleUrl>'
+                    f'<Point><coordinates>{s["lon"]:.7f},{s["lat"]:.7f},0</coordinates></Point></Placemark>')
+    field_folder = f'<Folder><name>Radio sul campo</name>{"".join(fpts)}</Folder>' if fpts else ""
     return ('<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document>'
             f'<name>{escape(title)}</name>{"".join(styles)}'
             f'<Folder><name>Griglia</name>{"".join(polys)}</Folder>'
-            f'<Folder><name>Punti</name>{"".join(pts)}</Folder></Document></kml>\n')
+            f'<Folder><name>Punti base</name>{"".join(pts)}</Folder>{field_folder}</Document></kml>\n')
 
 
-def to_html(samples, cells, thresholds, title: str) -> str:
+def to_html(samples, cells, thresholds, title: str, field=None) -> str:
     tpl = resources.files("sitesurvey").joinpath("templates/map.html").read_text(encoding="utf-8")
     legend = [{"name": n, "color": c, "from": t} for (n, c), t in zip(LEVELS, list(thresholds) + [None])]
     legend.append({"name": NO_SIGNAL[0], "color": NO_SIGNAL[1], "from": None})
-    data = {"title": title, "samples": samples, "cells": cells, "thresholds": list(thresholds),
-            "legend": legend, "stats": stats(samples, thresholds)}
+    field = field or []
+    radios = sorted({s.get("radio_id", "") for s in field if s.get("radio_id")})
+    data = {"title": title, "samples": samples, "field": field, "cells": cells,
+            "thresholds": list(thresholds), "legend": legend, "radios": radios,
+            "stats": stats(samples, thresholds)}
     payload = json.dumps(data, separators=(",", ":")).replace("</", "<\\/")
     return tpl.replace("__TITLE__", escape(title)).replace("__DATA__", payload)
 
@@ -149,17 +175,17 @@ def export_session(src: str | Path, outdir: str | Path | None = None, cell_m: fl
     sess_dir = src if src.is_dir() else src.parent
     out = Path(outdir) if outdir else sess_dir
     out.mkdir(parents=True, exist_ok=True)
-    samples = load_samples(src)
-    cells = grid(samples, cell_m)
+    base, field = split_roles(load_samples(src))
+    cells = grid(base, cell_m)   # la copertura si calcola sulla base (downlink)
     title = f"Copertura radio - {sess_dir.name}"
     files = {
         "html": out / "map.html",
         "kml": out / "coverage.kml",
         "geojson": out / "coverage.geojson",
     }
-    files["html"].write_text(to_html(samples, cells, thresholds, title), encoding="utf-8")
-    files["kml"].write_text(to_kml(samples, cells, thresholds, title), encoding="utf-8")
-    files["geojson"].write_text(json.dumps(to_geojson(samples, cells, thresholds)), encoding="utf-8")
+    files["html"].write_text(to_html(base, cells, thresholds, title, field), encoding="utf-8")
+    files["kml"].write_text(to_kml(base, cells, thresholds, title, field), encoding="utf-8")
+    files["geojson"].write_text(json.dumps(to_geojson(base, cells, thresholds, field)), encoding="utf-8")
     return files
 
 
