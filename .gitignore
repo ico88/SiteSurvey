@@ -5,3 +5,8 @@ build/
 dist/
 .venv/
 .pytest_cache/
+
+# Segreti locali (chiavi radio, token): mai nel repo
+secrets.toml
+**/secrets.toml
+*.secret.toml

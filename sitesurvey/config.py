@@ -149,11 +149,33 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+SECRETS_FILENAME = "secrets.toml"
+
+
+def _load_secrets(cfg: dict, config_path: Path) -> dict:
+    """Sovrappone un file di segreti (gitignorato) alla config.
+
+    Cercato, nell'ordine: [general].secrets_file, poi 'secrets.toml' accanto al
+    file di configurazione. Serve a tenere fuori dal repo chiavi come xnl_key.
+    """
+    candidates = []
+    explicit = cfg.get("general", {}).get("secrets_file")
+    if explicit:
+        candidates.append(Path(explicit))
+    candidates.append(config_path.parent / SECRETS_FILENAME)
+    for sp in candidates:
+        if sp.exists():
+            with sp.open("rb") as f:
+                return _merge(cfg, tomllib.load(f))
+    return cfg
+
+
 def load_config(path: str | None = None) -> dict:
     p = Path(path or DEFAULT_CONFIG_PATH)
     if not p.exists():
         if path:
             raise FileNotFoundError(f"File di configurazione non trovato: {p}")
-        return copy.deepcopy(DEFAULTS)
+        return _load_secrets(copy.deepcopy(DEFAULTS), p)
     with p.open("rb") as f:
-        return _merge(DEFAULTS, tomllib.load(f))
+        cfg = _merge(DEFAULTS, tomllib.load(f))
+    return _load_secrets(cfg, p)

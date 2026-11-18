@@ -38,6 +38,11 @@ python3 -m venv --system-site-packages /opt/sitesurvey/venv
 
 install -d -m 0755 /etc/sitesurvey
 [ -f /etc/sitesurvey/config.toml ] || install -m 0644 config/config.example.toml /etc/sitesurvey/config.toml
+# file dei segreti (chiavi radio): separato, permessi stretti, MAI nel repo
+if [ ! -f /etc/sitesurvey/secrets.toml ]; then
+  install -m 0600 -o sitesurvey -g sitesurvey config/secrets.example.toml /etc/sitesurvey/secrets.toml
+  echo "Creato /etc/sitesurvey/secrets.toml (metti qui xnl_key)."
+fi
 install -d -o sitesurvey -g sitesurvey /var/lib/sitesurvey
 
 # l'interfaccia USB della radio non deve diventare la rotta di default

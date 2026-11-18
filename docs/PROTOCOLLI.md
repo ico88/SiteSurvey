@@ -66,9 +66,15 @@ La radio manda una challenge `[magic 2B][random 8B]` e si risponde con
 `TEA(random8, chiave16)` (TEA classico, 32 round, big-endian). Due modi:
 
 1. **Chiave XNL** (consigliato): con la chiave corretta (16 byte) l'auth riesce
-   ad **ogni** tentativo. Si mette in `[radio.motorola] xnl_key = "..."`. La
-   chiave è un **segreto Motorola** e **non è nel repository**: va copiata dal
-   proprio `dmr-tracker` (`radioserver.py`, `XNL_KEY`) nel config locale del Pi.
+   ad **ogni** tentativo. La chiave è un **segreto Motorola** e **non è nel
+   repository**: va in un file separato e gitignorato,
+   **`/etc/sitesurvey/secrets.toml`** (si sovrappone a `config.toml`):
+   ```toml
+   [radio.motorola]
+   xnl_key = "…la chiave da dmr-tracker/radioserver.py (XNL_KEY)…"
+   ```
+   (`chmod 600`, proprietario `sitesurvey` — lo fa l'installer). Modello:
+   `config/secrets.example.toml`.
 2. **Lookup** (fallback senza chiave): tabella `random → risposta` da catture
    Wireshark in `[radio.motorola.xcmp_lookup]` (tre coppie incluse). Il random si
    ripete con periodo ~170, quindi servono molti tentativi e molte coppie.

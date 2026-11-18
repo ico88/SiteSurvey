@@ -38,9 +38,10 @@ xcmp_enabled = false       # true per beacon PTT / lettura RSSI via XCMP
 xcmp_port = 8002
 xcmp_max_attempts = 300
 # Auth XNL: con la CHIAVE TEA (16 byte in hex) la radio autentica ad OGNI
-# tentativo (niente lookup). La chiave e' un segreto: NON e' nel repo. Copiala
-# dal tuo dmr-tracker (radioserver.py: XNL_KEY) e incollala qui.
-xnl_key = ""               # es. "0011223344556677889900aabbccddee" (16 byte)
+# tentativo (niente lookup). La chiave e' un segreto: mettila in
+# /etc/sitesurvey/secrets.toml (file separato, non nel repo), non qui.
+# Vedi config/secrets.example.toml.
+# xnl_key = ""
 
 # Fallback se non hai la chiave: coppie challenge/response da Wireshark.
 # Formato: random_hex = risposta_hex
