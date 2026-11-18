@@ -144,10 +144,16 @@ class MotorolaDriver(RadioDriver):
         need_xcmp = (rssi.get("method") in ("radiostatus", "xcmp_notify", "disptxt_menu")
                      or self.cfg.get("xcmp_enabled", False))
         if need_xcmp:
+            key_hex = (self.cfg.get("xnl_key", "") or "").replace(" ", "").replace(":", "")
+            key = bytes.fromhex(key_hex) if key_hex else None
+            if key is not None and len(key) != 16:
+                log.warning("radio.motorola.xnl_key non valida (servono 16 byte): ignorata")
+                key = None
             try:
                 self.xcmp = XcmpSession(self.host, int(self.cfg.get("xcmp_port", 8002)),
                                         lookup=self.cfg.get("xcmp_lookup"),
-                                        max_attempts=int(self.cfg.get("xcmp_max_attempts", 300)))
+                                        max_attempts=int(self.cfg.get("xcmp_max_attempts", 300)),
+                                        key=key)
                 self.xcmp.connect()
             except (RuntimeError, OSError) as e:
                 log.warning("XCMP non disponibile (beacon PTT / RSSI disattivati): %s", e)

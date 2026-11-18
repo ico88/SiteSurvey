@@ -143,6 +143,16 @@ def test_xcmp_pack_parse():
     assert d["full_body"].find((0xB40E).to_bytes(2, "big")) >= 0
 
 
+def test_xcmp_tea():
+    # vettori neutri (chiave non segreta): verificano l'implementazione TEA
+    assert xcmp.tea_encrypt_be(b"\x00" * 8, b"\x00" * 16).hex() == "41ea3a0a94baa940"
+    assert xcmp.tea_encrypt_be(bytes.fromhex("0102030405060708"),
+                               bytes.fromhex("000102030405060708090a0b0c0d0e0f")).hex() == "b1a1ab198c45fa5b"
+    import pytest as _pt
+    with _pt.raises(ValueError):
+        xcmp.tea_encrypt_be(b"\x00" * 7, b"\x00" * 16)
+
+
 def test_xcmp_challenge_response_frame():
     magic = b"\xff\xfc"
     body = magic + bytes.fromhex("2dff77997feb0b64")

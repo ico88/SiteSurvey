@@ -62,11 +62,19 @@ alla tua radio/firmware senza toccare il codice. Con `lrrp_passive_only = true`
 non si invia nulla e si usano solo i report periodici configurati nel CPS.
 
 ### Auth XCMP (solo per beacon PTT e RSSI)
-La radio manda una challenge `[magic 2B][random 8B]`; il random si ripete con
-periodo ~170 connessioni. Per ogni random noto si conosce la risposta (da
-catture Wireshark). Si ritenta la connessione finché la challenge cade su un
-random in tabella. Le coppie vanno in `[radio.motorola.xcmp_lookup]`; tre sono
-già incluse come default. **Non serve la chiave ADK/TEA.**
+La radio manda una challenge `[magic 2B][random 8B]` e si risponde con
+`TEA(random8, chiave16)` (TEA classico, 32 round, big-endian). Due modi:
+
+1. **Chiave XNL** (consigliato): con la chiave corretta (16 byte) l'auth riesce
+   ad **ogni** tentativo. Si mette in `[radio.motorola] xnl_key = "..."`. La
+   chiave è un **segreto Motorola** e **non è nel repository**: va copiata dal
+   proprio `dmr-tracker` (`radioserver.py`, `XNL_KEY`) nel config locale del Pi.
+2. **Lookup** (fallback senza chiave): tabella `random → risposta` da catture
+   Wireshark in `[radio.motorola.xcmp_lookup]` (tre coppie incluse). Il random si
+   ripete con periodo ~170, quindi servono molti tentativi e molte coppie.
+
+L'implementazione TEA è verificata: riproduce esattamente le coppie
+challenge/response catturate sul campo.
 
 ### RSSI numerico — metodo ufficiale (XCMP Radio Status)
 Ricavato per interoperabilità dal **MOTOTRBO Site Survey ufficiale** (decompilazione

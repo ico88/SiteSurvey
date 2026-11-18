@@ -35,7 +35,10 @@ DEFAULTS: dict = {
             "xcmp_enabled": False,
             "xcmp_port": 8002,
             "xcmp_max_attempts": 300,
-            "xcmp_lookup": {},         # {"<random hex>": "<risposta hex>", ...}
+            # Auth XNL: con la chiave TEA (16 byte hex) autentica ad ogni tentativo.
+            # NON inclusa qui (segreto): copiala nel config dal tuo dmr-tracker.
+            "xnl_key": "",
+            "xcmp_lookup": {},         # fallback: {"<random hex>": "<risposta hex>", ...}
             "cai_network": 12,
             "cai_group_network": 225,
             # RSSI numerico Motorola:

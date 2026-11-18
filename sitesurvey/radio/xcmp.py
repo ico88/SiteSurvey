@@ -64,6 +64,26 @@ RSSI_MENU_SEQUENCE = ["left", "left", "left", "right", "right", "right"]
 _DBM_RE = re.compile(r"-?\d{2,3}")
 
 
+def tea_encrypt_be(block8: bytes, key16: bytes) -> bytes:
+    """TEA classico (32 round, big-endian) usato dall'auth XNL MOTOTRBO.
+
+    Risposta al challenge = TEA(random8, chiave16). Con la chiave corretta
+    l'autenticazione riesce ad OGNI tentativo (non serve la lookup).
+    """
+    if len(block8) != 8 or len(key16) != 16:
+        raise ValueError("TEA: challenge 8 byte e chiave 16 byte")
+    v0, v1 = struct.unpack(">2I", block8)
+    k0, k1, k2, k3 = struct.unpack(">4I", key16)
+    total = 0
+    delta = 0x9E3779B9
+    mask = 0xFFFFFFFF
+    for _ in range(32):
+        total = (total + delta) & mask
+        v0 = (v0 + (((v1 << 4) + k0) ^ (v1 + total) ^ ((v1 >> 5) + k1))) & mask
+        v1 = (v1 + (((v0 << 4) + k2) ^ (v0 + total) ^ ((v0 >> 5) + k3))) & mask
+    return struct.pack(">2I", v0, v1)
+
+
 def pack_ext(pkt_type: int, cookie: bytes, body: bytes) -> bytes:
     c4 = (cookie + b"\x00\x00\x00\x00")[:4]
     inner = (struct.pack(">H", pkt_type) + b"\x00\x00" + c4 + b"\x00\x00"
@@ -123,10 +143,12 @@ class XcmpSession:
     """Sessione XCMP autenticata (best-effort). Gestisce keepalive in un thread."""
 
     def __init__(self, host: str, port: int = 8002, lookup: dict | None = None,
-                 timeout: float = 5.0, max_attempts: int = 300):
+                 timeout: float = 5.0, max_attempts: int = 300, key: bytes | None = None):
         self.host, self.port, self.timeout = host, port, timeout
         self.lookup = {**DEFAULT_LOOKUP, **(lookup or {})}
-        self.max_attempts = max_attempts
+        self.key = key  # chiave XNL (16 byte): se presente, auth TEA ad ogni tentativo
+        # con la chiave bastano pochi tentativi; la lookup ne richiede molti
+        self.max_attempts = max_attempts if not key else max(5, min(max_attempts, 10))
         self.sock: socket.socket | None = None
         self._alive = False
         self._lock = threading.Lock()
@@ -173,13 +195,18 @@ class XcmpSession:
             if pt == 0x0005 and state in ("WAIT_CHAL", "WAIT_AUTH"):
                 if len(body) < 10:
                     break
-                magic, random_hex = body[0:2], body[2:10].hex()
-                if random_hex in self.lookup:
-                    rsp = bytes.fromhex("00000a01") + bytes.fromhex(self.lookup[random_hex])
-                    s.sendall(pack_ext(0x0006, b"\x00\x00" + magic, rsp))
+                magic, random8 = body[0:2], body[2:10]
+                response = None
+                if self.key:
+                    response = tea_encrypt_be(random8, self.key)   # auth nativa
+                elif random8.hex() in self.lookup:
+                    response = bytes.fromhex(self.lookup[random8.hex()])  # fallback lookup
+                if response is not None:
+                    s.sendall(pack_ext(0x0006, b"\x00\x00" + magic,
+                                       bytes.fromhex("00000a01") + response))
                     state = "WAIT_AUTH"
                 else:
-                    break  # random non noto: chiudi e ritenta
+                    break  # senza chiave e random non in tabella: chiudi e ritenta
         s.close()
         return None
 
