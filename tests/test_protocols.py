@@ -149,6 +149,21 @@ def test_xcmp_challenge_response_frame():
     assert body[2:10].hex() in xcmp.DEFAULT_LOOKUP
 
 
+def test_xcmp_radiostatus_rssi():
+    # Metodo ufficiale: condizione 0x02, formula -(b0 + b1/256)
+    assert xcmp.decode_rssi(bytes([95, 128])) == -95.5
+    assert xcmp.decode_rssi(bytes([101, 0])) == -101.0
+    assert xcmp.decode_rssi(b"\x00") is None
+    s = xcmp.XcmpSession.__new__(xcmp.XcmpSession)
+    # [80 0e][result 00][cond 02][b0 5f][b1 40] -> -(95 + 64/256)
+    s.notifications = [bytes([0x80, 0x0E, 0x00, 0x02, 0x5F, 0x40])]
+    assert s.read_rssi_radiostatus() == -95.25
+    s.notifications = [bytes([0x80, 0x0E, 0x02, 0x55, 0x00])]  # senza result byte
+    assert s.read_rssi_radiostatus() == -85.0
+    s.notifications = [b"nessun reply qui"]
+    assert s.read_rssi_radiostatus() is None
+
+
 def test_xcmp_display_rssi_parse():
     # RSSI Motorola letto dal testo del display (metodo menu nascosto)
     s = xcmp.XcmpSession.__new__(xcmp.XcmpSession)

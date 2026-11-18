@@ -33,6 +33,22 @@ PTT_SUBOP = 0x0415
 PTT_ON = bytes.fromhex("0100")
 PTT_OFF = bytes.fromhex("0200")
 
+# --- RSSI "ufficiale": XCMP Radio Status (come il MOTOTRBO Site Survey) -------
+# Costanti e formula ricavate per interoperabilita' dal tool ufficiale Motorola
+# (decompilazione di Mototrbo.Xcmp.dll, posseduto dall'utente). NON contiene
+# chiavi/segreti: sono fatti di protocollo.
+RADIO_STATUS_REQ = 0x000E
+RADIO_STATUS_REPLY = 0x800E
+STATUS_COND_RSSI = 0x02        # StatusCondition.ReadRssi
+STATUS_COND_RADIO_ID = 0x0E
+
+
+def decode_rssi(value: bytes) -> float | None:
+    """RSSI in dBm dal valore del RadioStatusReply: -(b0 + b1/256)."""
+    if len(value) < 2:
+        return None
+    return -(value[0] + value[1] / 256.0)
+
 # --- Lettura RSSI Motorola: non c'e' uno status XCMP pulito. Il metodo noto
 # (progetto MIT nr23730/trboxcmp) e': entrare nel menu RSSI nascosto della radio
 # con una sequenza di tasti, poi leggere il numero dal testo del display, che la
@@ -228,6 +244,35 @@ class XcmpSession:
 
     def send_ptt(self, on: bool, ms: int = 500) -> None:
         self._send_data_cmd(PTT_SUBOP, PTT_ON if on else PTT_OFF)
+
+    # --- RSSI via Radio Status (metodo del tool ufficiale) ----------------
+    def request_radio_status(self, condition: int = STATUS_COND_RSSI) -> None:
+        """Invia un XCMP RadioStatusRequest (0x000E) con la condizione data.
+
+        Il trasporto riusa il framing provato per il PTT; il formato esatto puo'
+        variare per modello: verificabile con Wireshark sul tool ufficiale.
+        """
+        self._send_data_cmd(RADIO_STATUS_REQ, bytes([condition & 0xFF]))
+
+    def read_rssi_radiostatus(self) -> float | None:
+        """Cerca l'ultimo RadioStatusReply RSSI e lo converte in dBm.
+
+        Cerca la sequenza [80 0e] e, poco dopo, la condizione 02 seguita dai due
+        byte di valore. Formula ufficiale: -(b0 + b1/256).
+        """
+        marker = bytes([0x80, 0x0E])
+        for frame in reversed(self.notifications):
+            pos = frame.find(marker)
+            if pos < 0:
+                continue
+            tail = frame[pos + 2:pos + 10]
+            # la condizione 0x02 compare subito dopo un eventuale byte di result
+            for off in (0, 1):
+                if len(tail) >= off + 3 and tail[off] == STATUS_COND_RSSI:
+                    val = decode_rssi(tail[off + 1:off + 3])
+                    if val is not None and -130 <= val <= -20:
+                        return val
+        return None
 
     # --- lettura RSSI dal menu nascosto + display -------------------------
     def press_button(self, name: str, hold_ms: int = 100) -> None:

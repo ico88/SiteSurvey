@@ -31,7 +31,7 @@ lsusb | grep -i 238b
 | Beacon DMR | pacchetto UDP verso l'IP CAI (`12.x.y.z`, gruppi `225.x.y.z`) | Implementato |
 | Beacon analogico | PTT via XCMP (subop `0x0415`) | Richiede XCMP autenticato |
 | Auth XCMP | challenge/response a **lookup** (nessuna chiave ADK) | Dai dump; servono le coppie |
-| **RSSI numerico** | menu RSSI nascosto (tasti) + testo del display (DISPTXT) | Metodo noto (trboxcmp, MIT) |
+| **RSSI numerico** | XCMP Radio Status, condizione RSSI `0x02` → `-(b0 + b1/256)` dBm | **Metodo del tool ufficiale** |
 
 ### GPS — nessuna licenza
 Il GPS funziona senza XCMP e senza chiavi: basta abilitare GPS e "Location"/
@@ -68,28 +68,29 @@ catture Wireshark). Si ritenta la connessione finché la challenge cade su un
 random in tabella. Le coppie vanno in `[radio.motorola.xcmp_lookup]`; tre sono
 già incluse come default. **Non serve la chiave ADK/TEA.**
 
-### RSSI numerico — metodo "menu nascosto + display"
-MOTOTRBO non espone un RSSI numerico pulito via XCMP. Il metodo usato dai
-progetti noti (es. **nr23730/trboxcmp**, MIT) è: entrare nel **menu RSSI
-nascosto** della radio con una sequenza di tasti (default: sinistra×3,
-destra×3), poi leggere il **dBm dal testo del display**, che la radio trasmette
-come broadcast `DISPTXT` (`0xB401`). È lo stesso valore che vedi sullo schermo in
-modalità test.
+### RSSI numerico — metodo ufficiale (XCMP Radio Status)
+Ricavato per interoperabilità dal **MOTOTRBO Site Survey ufficiale** (decompilazione
+di `Mototrbo.Xcmp.dll`, posseduto dall'utente — sono fatti di protocollo, nessun
+segreto):
 
-In `[radio.motorola.rssi]` con `method="disptxt_menu"`:
-- `menu_sequence` — i tasti per arrivare alla schermata RSSI (dipende dal
-  modello/codeplug; cambiali se serve);
-- `text_regex` — opzionale, per estrarre il numero se il formato del display è
-  particolare (vuoto = cerca un numero `-dd`/`-ddd`).
+- opcode **`RadioStatusRequest = 0x000E`**, reply **`RadioStatusReply = 0x800E`**;
+- `StatusCondition.ReadRssi = 0x02` (altre: ModelNumber 0x07, SerialNumber 0x08,
+  RadioID 0x0E);
+- la radio risponde con due byte di valore e il dBm è:
 
-Richiede XCMP autenticato (`xcmp_enabled=true` + coppie `xcmp_lookup`). Per
-verificare cosa manda il display:
-```bash
-sudo systemctl stop sitesurvey
-sitesurvey probe --driver motorola --rssi-scan -n 20
-```
-Mostra le righe `display:` catturate: se il formato è diverso, aggiusta
-`menu_sequence` o `text_regex`.
+  **`RSSI = -(byte0 + byte1 / 256)`**
+
+  (parte intera in dBm + frazione in 1/256). Es. `5F 40` → −(95 + 64/256) = −95.25 dBm.
+
+Config: `[radio.motorola.rssi] method="radiostatus"`. Richiede XCMP autenticato
+(`xcmp_enabled=true` + coppie `xcmp_lookup`). Nessuna taratura: il valore è già in
+dBm.
+
+> Il **trasporto** della richiesta (framing XNL/XCMP) riusa il percorso provato
+> per il PTT: su alcuni modelli il formato esatto può differire. Avendo ora il
+> tool ufficiale, puoi **catturarlo con Wireshark** mentre fa una lettura RSSI e
+> confermare i byte. Resta disponibile il ripiego `method="disptxt_menu"` (menu
+> RSSI nascosto + testo del display).
 
 ## Hytera
 
@@ -128,9 +129,12 @@ Pi (che offline non ha RTC).
 ## Crediti e licenze dei riferimenti
 - Parser LRRP/ARS e transport Hytera USB: portati dai moduli verificati sul campo
   di `ico88/raspradio` e `ico88/DMR-Tracker`.
-- Metodo RSSI Motorola (menu nascosto + DISPTXT) e opcode tasti/display:
-  ispirati a **nr23730/trboxcmp** — licenza **MIT** (riuso consentito con
-  attribuzione).
+- RSSI Motorola (XCMP Radio Status, condizione 0x02, formula `-(b0+b1/256)`),
+  opcode 0x000E/0x800E/0x0415: ricavati per **interoperabilità** dal MOTOTRBO
+  Site Survey ufficiale posseduto dall'utente (decompilazione delle sue DLL
+  .NET). Sono informazioni di protocollo necessarie a far dialogare le proprie
+  radio; **nessuna chiave o segreto** è estratto o incluso. Il ripiego
+  `disptxt_menu` è ispirato a **nr23730/trboxcmp** (MIT).
 - Struttura del Location Protocol Hytera (GPS + RSSI): studiata su
   **OK-DMR/ok-dmrlib** — licenza **AGPL-3.0**. Qui è **riscritta da zero**: non è
   incluso né linkato codice AGPL, così SiteSurvey non eredita l'AGPL.

@@ -141,7 +141,7 @@ class MotorolaDriver(RadioDriver):
         self._rssi_menu_entered = False
         # XCMP e' opzionale: serve per beacon PTT e per la lettura RSSI.
         rssi = self.cfg.get("rssi", {})
-        need_xcmp = (rssi.get("method") in ("xcmp_notify", "disptxt_menu")
+        need_xcmp = (rssi.get("method") in ("radiostatus", "xcmp_notify", "disptxt_menu")
                      or self.cfg.get("xcmp_enabled", False))
         if need_xcmp:
             try:
@@ -215,6 +215,12 @@ class MotorolaDriver(RadioDriver):
         method = rssi.get("method", "none")
         if not (self.xcmp and self.xcmp.alive):
             return None
+        if method == "radiostatus":
+            # Metodo del MOTOTRBO Site Survey ufficiale: RadioStatusRequest con
+            # condizione RSSI (0x02), reply decodificato come -(b0 + b1/256).
+            self.xcmp.request_radio_status()
+            time.sleep(float(rssi.get("reply_wait_s", 0.25)))
+            return self.xcmp.read_rssi_radiostatus()
         if method == "disptxt_menu":
             # Metodo noto (trboxcmp, MIT): entra nel menu RSSI nascosto una volta,
             # poi leggi il dBm dal testo del display che la radio trasmette.

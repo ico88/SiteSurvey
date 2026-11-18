@@ -49,10 +49,16 @@ xcmp_max_attempts = 300    # ritenta finche' la challenge cade su un random noto
 #                 Richiede xcmp_enabled=true + coppie xcmp_lookup valide.
 #  xcmp_notify  : decodifica un byte da una notifica XCMP (offset da tarare).
 #  none         : non misurato.
+# method:
+#  radiostatus  = come il MOTOTRBO Site Survey ufficiale: XCMP Radio Status,
+#                 condizione RSSI 0x02, reply decodificato -(b0 + b1/256).
+#  disptxt_menu = ripiego: menu RSSI nascosto + testo del display.
+#  xcmp_notify / none
 [radio.motorola.rssi]
-method = "disptxt_menu"
+method = "radiostatus"
+reply_wait_s = 0.25        # attesa del reply RSSI dopo la richiesta
 menu_sequence = ["left", "left", "left", "right", "right", "right"]
-text_regex = ""            # vuoto = cerca un numero -dd/-ddd nel testo display
+text_regex = ""
 notify_subop = 0xB40E
 value_offset = 0
 value_len = 1

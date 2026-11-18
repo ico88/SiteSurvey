@@ -39,14 +39,16 @@ DEFAULTS: dict = {
             "cai_network": 12,
             "cai_group_network": 225,
             # RSSI numerico Motorola:
-            #  disptxt_menu = entra nel menu RSSI nascosto (tasti) e legge il
-            #                 dBm dal testo del display (metodo noto, trboxcmp)
+            #  radiostatus  = XCMP Radio Status, condizione RSSI 0x02 -> dBm
+            #                 con -(b0 + b1/256). E' il metodo del tool ufficiale.
+            #  disptxt_menu = ripiego: menu RSSI nascosto + testo del display
             #  xcmp_notify  = decodifica una notifica XCMP (offset da tarare)
             #  none         = non misurato
             "rssi": {
-                "method": "disptxt_menu",
+                "method": "radiostatus",
+                "reply_wait_s": 0.25,
                 "menu_sequence": ["left", "left", "left", "right", "right", "right"],
-                "text_regex": "",      # vuoto = cerca un numero -dd/-ddd nel display
+                "text_regex": "",
                 "notify_subop": 0xB40E,
                 "value_offset": 0,
                 "value_len": 1,
